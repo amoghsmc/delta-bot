@@ -121,41 +121,39 @@ def get_order_status(order_id):
         return result.get('result')
     return None
 
-def place_limit_order(side, price, size):
-    """Place limit order on Delta Exchange (WITHOUT stop loss)"""
+def place_stop_entry_order(side, stop_price, size):
+    """Place a stop-market entry order (Buy/Sell Stop)"""
     contracts = int(size * 1000)
-    
+    stop_side = side.lower()
+
     order_data = {
         "product_symbol": SYMBOL,
         "size": contracts,
-        "side": side,
-        "order_type": "limit_order",
-        "limit_price": str(price),
-        "time_in_force": "gtc"
+        "side": stop_side,
+        "order_type": "market_order",
+        "stop_order_type": "stop_market_order",
+        "stop_price": str(stop_price),
+        "stop_trigger_method": "mark_price"
     }
-    
+
     payload = json.dumps(order_data)
     result = make_api_request('POST', '/orders', payload)
-    
+
     if result and result.get('success'):
         order_id = result['result']['id']
-        message = f"✅ *{side.upper()} LIMIT ORDER PLACED*\n" \
-                 f"📊 Order ID: `{order_id}`\n" \
-                 f"💰 Price: `${price}`\n" \
-                 f"📏 Size: `{contracts}` contracts ({size} BTC)\n" \
-                 f"🎯 Symbol: `{SYMBOL}`\n" \
-                 f"⏳ Waiting for fill to place SL..."
-        
+        message = f"\U0001F680 *{side.upper()} STOP ORDER PLACED*\n" \
+                  f"\U0001F53C Trigger: `${stop_price}`\n" \
+                  f"\U0001F4CF Size: `{contracts}` contracts ({size} BTC)\n" \
+                  f"\U0001F3AF Symbol: `{SYMBOL}`\n" \
+                  f"\u23F3 Waiting for stop trigger to place SL..."
         log_and_notify(message)
         return order_id
     else:
-        error_msg = f"❌ *FAILED TO PLACE {side.upper()} LIMIT ORDER*\n" \
-                   f"💰 Price: `${price}`\n" \
-                   f"📏 Size: `{contracts}` contracts\n" \
-                   f"🚨 Error: `{result}`"
+        error_msg = f"❌ *FAILED TO PLACE {side.upper()} STOP ORDER*\n" \
+                    f"\U0001F53C Stop Price: `${stop_price}`\n" \
+                    f"🚨 Error: `{result}`"
         log_and_notify(error_msg, "error")
         return None
-
 def place_stop_loss_order(original_side, stop_price, size):
     """Place stop loss order after main order is filled"""
     sl_side = "sell" if original_side == "buy" else "buy"
@@ -257,17 +255,25 @@ def monitor_order_and_place_sl(order_id, original_side, stop_loss_price, contrac
             time.sleep(1)
             attempt += 1
     
-    # If max attempts reached
-    if attempt >= max_attempts:
-        message = f"⏰ *ORDER MONITORING TIMEOUT*\n" \
-                 f"📊 Order ID: `{order_id}`\n" \
-                 f"⚠️ Stopped monitoring after 5 minutes\n" \
-                 f"🔍 Please check order status manually"
-        log_and_notify(message, "warning")
-        
-        # Remove from pending
-        if order_id in pending_stop_losses:
-            del pending_stop_losses[order_id]
+    # If max attempts reached (order not filled in 5 minutes)
+if attempt >= max_attempts:
+    message = f"⏰ *ORDER MONITORING TIMEOUT*\n" \
+             f"📊 Order ID: `{order_id}`\n" \
+             f"⚠️ Not filled within 5 minutes\n" \
+             f"🗑️ Attempting to cancel the order automatically..."
+    log_and_notify(message, "warning")
+
+    # Try canceling the order
+    cancel_result = make_api_request('DELETE', f'/orders/{order_id}')
+    if cancel_result and cancel_result.get('success'):
+        log_and_notify(f"✅ *ORDER CANCELLED SUCCESSFULLY*\n📊 Order ID: `{order_id}`")
+    else:
+        log_and_notify(f"❌ *FAILED TO CANCEL ORDER*\n📊 Order ID: `{order_id}`", "error")
+
+    # Clean up pending SL tracker
+    if order_id in pending_stop_losses:
+        del pending_stop_losses[order_id]
+
 
 def cancel_all_orders():
     """Cancel all open orders for the symbol"""
