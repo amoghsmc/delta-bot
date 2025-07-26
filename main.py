@@ -28,7 +28,7 @@ TELEGRAM_API_URL = f'https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessag
 # Trading Configuration
 SYMBOL = 'BTCUSD'
 PRODUCT_ID = 27
-LOT_SIZE = 0.01
+LOT_SIZE = 0.005
 
 # Global variables
 current_position = None
