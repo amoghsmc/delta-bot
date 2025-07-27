@@ -17,12 +17,12 @@ app = Flask(__name__)
 
 # Delta Exchange API Configuration
 BASE_URL = 'https://api.india.delta.exchange'
-API_KEY = 'NWczUdbIrRFolMpPM32'  # Replace with your actual API key
-API_SECRET = 'YTN79e7x2vuLSYzPxsMaEpH0ZwXptQRwl9zjEby0Z8oAp'  # Replace with your actual API secret
+API_KEY = 'NWczUdbI9vVbBlCASC0rRFolMpPM32'  # Replace with your actual API key
+API_SECRET = 'YTN79e7x2vuLSYzGW7YUBMnZNJEXTDPxsMaEpH0ZwXptQRwl9zjEby0Z8oAp'  # Replace with your actual API secret
 
 # Telegram Configuration
-TELEGRAM_BOT_TOKEN = '8068558T140H9vJXbcaVZ9Jk'  # Replace with your actual bot token
-TELEGRAM_CHAT_ID = '8759'  # Replace with your actual chat ID
+TELEGRAM_BOT_TOKEN = '8068558939:AAHcsThdbt0J1uzI0mT140H9vJXbcaVZ9Jk'  # Replace with your actual bot token
+TELEGRAM_CHAT_ID = '871704959'  # Replace with your actual chat ID
 TELEGRAM_API_URL = f'https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage'
 
 # Trading Configuration
@@ -34,7 +34,7 @@ LOT_SIZE = 0.005
 current_position = None
 active_orders = {}
 stop_loss_orders = {}
-pending_stop_losses = {}  # Store pending SL orders with their details
+pending_stop_losses = {}
 
 def send_telegram_message(message):
     """Send message to Telegram"""
@@ -396,23 +396,31 @@ def webhook():
         entry_price = float(data.get('entry_price', 0))
         stop_loss = float(data.get('stop_loss', 0))
         
+        # ✅ NEW: Extract additional data from SMC indicator
+        lot_size_from_alert = float(data.get('lot_size', LOT_SIZE))
+        signal_type = data.get('signal_type', 'UNKNOWN')
+        entry_method = data.get('entry_method', 'STOP_LIMIT')
+        strategy_name = data.get('strategy', 'UNKNOWN')
+        
         if alert_type == 'LONG_ENTRY':
             message = f"🟢 *LONG ENTRY SIGNAL RECEIVED*\n" \
                      f"💰 Entry Price: `${entry_price}`\n" \
                      f"🛡️ Stop Loss: `${stop_loss}`\n" \
-                     f"📏 Size: `{LOT_SIZE}` BTC\n" \
-                     f"📋 Order Type: Stop Limit Order"
+                     f"📏 Size: `{lot_size_from_alert}` BTC\n" \
+                     f"📋 Strategy: `{strategy_name}`\n" \
+                     f"🎯 Signal: `{signal_type}`\n" \
+                     f"📋 Order Type: {entry_method}"
             log_and_notify(message)
             
             cancel_all_orders()
-            # Place stop limit order - buy when price goes above entry_price
-            order_id = place_stop_limit_order('buy', entry_price, entry_price, LOT_SIZE)
+            # Use dynamic lot size from alert
+            order_id = place_stop_limit_order('buy', entry_price, entry_price, lot_size_from_alert)
             if order_id:
                 active_orders['long'] = order_id
                 current_position = 'long_pending'
                 
-                # Store pending SL details
-                contracts = int(LOT_SIZE * 1000)
+                # Use dynamic lot size
+                contracts = int(lot_size_from_alert * 1000)
                 pending_stop_losses[order_id] = {
                     'side': 'buy',
                     'stop_price': stop_loss,
@@ -431,19 +439,21 @@ def webhook():
             message = f"🔴 *SHORT ENTRY SIGNAL RECEIVED*\n" \
                      f"💰 Entry Price: `${entry_price}`\n" \
                      f"🛡️ Stop Loss: `${stop_loss}`\n" \
-                     f"📏 Size: `{LOT_SIZE}` BTC\n" \
-                     f"📋 Order Type: Stop Limit Order"
+                     f"📏 Size: `{lot_size_from_alert}` BTC\n" \
+                     f"📋 Strategy: `{strategy_name}`\n" \
+                     f"🎯 Signal: `{signal_type}`\n" \
+                     f"📋 Order Type: {entry_method}"
             log_and_notify(message)
             
             cancel_all_orders()
-            # Place stop limit order - sell when price goes below entry_price
-            order_id = place_stop_limit_order('sell', entry_price, entry_price, LOT_SIZE)
+            # Use dynamic lot size from alert
+            order_id = place_stop_limit_order('sell', entry_price, entry_price, lot_size_from_alert)
             if order_id:
                 active_orders['short'] = order_id
                 current_position = 'short_pending'
                 
-                # Store pending SL details
-                contracts = int(LOT_SIZE * 1000)
+                # Use dynamic lot size
+                contracts = int(lot_size_from_alert * 1000)
                 pending_stop_losses[order_id] = {
                     'side': 'sell',
                     'stop_price': stop_loss,
@@ -457,15 +467,22 @@ def webhook():
                 )
                 monitor_thread.daemon = True
                 monitor_thread.start()
-            
+        
+        # ✅ NEW: Handle exit signals from SMC indicator
         elif alert_type == 'LONG_EXIT':
+            exit_reason = data.get('exit_reason', 'MANUAL')
             message = f"🚪 *LONG EXIT SIGNAL RECEIVED*\n" \
+                     f"📋 Strategy: `{strategy_name}`\n" \
+                     f"🔄 Reason: `{exit_reason}`\n" \
                      f"🔄 Closing long position..."
             log_and_notify(message)
             close_position()
             
         elif alert_type == 'SHORT_EXIT':
+            exit_reason = data.get('exit_reason', 'MANUAL')
             message = f"🚪 *SHORT EXIT SIGNAL RECEIVED*\n" \
+                     f"📋 Strategy: `{strategy_name}`\n" \
+                     f"🔄 Reason: `{exit_reason}`\n" \
                      f"🔄 Closing short position..."
             log_and_notify(message)
             close_position()
@@ -507,77 +524,4 @@ def status():
         status_data = {
             "current_position": current_position,
             "active_orders": active_orders,
-            "stop_loss_orders": stop_loss_orders,
-            "pending_stop_losses": pending_stop_losses,
-            "open_orders_count": len(open_orders),
-            "position_details": current_pos
-        }
-        
-        message = f"📊 *TRADING STATUS*\n" \
-                 f"🎯 Symbol: `{SYMBOL}`\n" \
-                 f"📈 Current Position: `{current_position or 'None'}`\n" \
-                 f"📋 Open Orders: `{len(open_orders)}`\n" \
-                 f"🛡️ Stop Loss Orders: `{len(stop_loss_orders)}`\n" \
-                 f"⏳ Pending SL Orders: `{len(pending_stop_losses)}`\n" \
-                 f"⏰ Auto-cancel: 90 minutes"
-        
-        if current_pos:
-            pos_size = current_pos.get('size', 0)
-            pos_value = abs(pos_size) * 0.001
-            message += f"\n💰 Position Size: `{pos_size}` contracts ({pos_value} BTC)"
-        
-        send_telegram_message(message)
-        return jsonify(status_data)
-    
-    except Exception as e:
-        error_msg = f"❌ *STATUS ERROR*\n🚨 Error: `{str(e)}`"
-        log_and_notify(error_msg, "error")
-        return jsonify({"status": "error", "message": str(e)}), 500
-
-@app.route('/cancel_all', methods=['POST'])
-def cancel_all():
-    """Cancel all orders endpoint"""
-    try:
-        cancel_all_orders()
-        return jsonify({"status": "success", "message": "All orders cancelled"})
-    except Exception as e:
-        error_msg = f"❌ *CANCEL ALL ERROR*\n🚨 Error: `{str(e)}`"
-        log_and_notify(error_msg, "error")
-        return jsonify({"status": "error", "message": str(e)}), 500
-
-@app.route('/test_telegram', methods=['GET'])
-def test_telegram():
-    """Test Telegram integration"""
-    test_message = "🧪 *TEST MESSAGE*\n" \
-                  f"🤖 Bot is working correctly!\n" \
-                  f"🎯 Symbol: `{SYMBOL}`\n" \
-                  f"📏 Lot Size: `{LOT_SIZE}` BTC\n" \
-                  f"⏰ Auto-cancel: 90 minutes\n" \
-                  f"📋 Order Type: Stop Limit Orders"
-    
-    send_telegram_message(test_message)
-    return jsonify({"status": "success", "message": "Test message sent to Telegram"})
-
-if __name__ == '__main__':
-    startup_message = f"🚀 *DELTA TRADING BOT STARTED*\n" \
-                     f"🎯 Symbol: `{SYMBOL}`\n" \
-                     f"📏 Lot Size: `{LOT_SIZE}` BTC\n" \
-                     f"📋 Order Type: Stop Limit Orders\n" \
-                     f"⏰ Auto-cancel: 90 minutes\n" \
-                     f"🌐 Webhook: `http://localhost:5000/webhook`\n" \
-                     f"📊 Status: `http://localhost:5000/status`\n" \
-                     f"🗑️ Cancel All: `http://localhost:5000/cancel_all`\n" \
-                     f"✨ *NEW: Stop Limit + 90min auto-cancel*"
-    
-    send_telegram_message(startup_message)
-    
-    logger.info("🚀 Starting Delta Exchange Trading Bot...")
-    logger.info(f"📊 Trading Symbol: {SYMBOL}")
-    logger.info(f"📏 Lot Size: {LOT_SIZE} BTC")
-    logger.info("📋 Order Type: Stop Limit Orders")
-    logger.info("⏰ Auto-cancel timeout: 90 minutes")
-    logger.info("🌐 Webhook endpoint: http://localhost:5000/webhook")
-    logger.info("📱 Telegram notifications enabled")
-    logger.info("✨ Stop Loss will be placed AFTER stop limit order fills")
-    
-    app.run(host='0.0.0.0', port=5000, debug=False)
+            
