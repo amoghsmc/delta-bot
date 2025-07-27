@@ -17,12 +17,12 @@ app = Flask(__name__)
 
 # Delta Exchange API Configuration
 BASE_URL = 'https://api.india.delta.exchange'
-API_KEY = 'NWczUdbI9vVbBlCASC0rRFolMpPM32'  # Replace with your actual API key
-API_SECRET = 'YTN79e7x2vuLSYzGW7YUBMnZNJEXTDPxsMaEpH0ZwXptQRwl9zjEby0Z8oAp'  # Replace with your actual API secret
+API_KEY = 'your_api_key_here'  # Replace with your actual API key
+API_SECRET = 'your_api_secret_here'  # Replace with your actual API secret
 
 # Telegram Configuration
-TELEGRAM_BOT_TOKEN = '8068558939:AAHcsThdbt0J1uzI0mT140H9vJXbcaVZ9Jk'  # Replace with your actual bot token
-TELEGRAM_CHAT_ID = '871704959'  # Replace with your actual chat ID
+TELEGRAM_BOT_TOKEN = 'your_telegram_bot_token'  # Replace with your actual bot token
+TELEGRAM_CHAT_ID = 'your_chat_id'  # Replace with your actual chat ID
 TELEGRAM_API_URL = f'https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage'
 
 # Trading Configuration
@@ -121,18 +121,27 @@ def get_order_status(order_id):
         return result.get('result')
     return None
 
-def place_stop_entry_order(side, stop_price, size):
-    """Place a stop-market entry order (Buy/Sell Stop)"""
+def place_stop_limit_order(side, stop_price, limit_price, size):
+    """Place a stop-limit order (Buy/Sell Stop Limit)"""
     contracts = int(size * 1000)
     stop_side = side.lower()
+    
+    # For stop limit order, we need to determine stop_order_type
+    if side.lower() == "buy":
+        # Buy stop limit - triggers when price goes above stop_price
+        stop_order_type = "take_profit_order"  # Used for buy stops
+    else:
+        # Sell stop limit - triggers when price goes below stop_price  
+        stop_order_type = "stop_loss_order"   # Used for sell stops
 
     order_data = {
         "product_symbol": SYMBOL,
         "size": contracts,
         "side": stop_side,
-        "order_type": "market_order",
-        "stop_order_type": "stop_market_order",
-        "stop_price": str(stop_price),
+        "order_type": "limit_order",  # This makes it a limit order
+        "limit_price": str(limit_price),  # Price at which order executes after trigger
+        "stop_order_type": stop_order_type,
+        "stop_price": str(stop_price),  # Trigger price
         "stop_trigger_method": "mark_price"
     }
 
@@ -141,19 +150,22 @@ def place_stop_entry_order(side, stop_price, size):
 
     if result and result.get('success'):
         order_id = result['result']['id']
-        message = f"\U0001F680 *{side.upper()} STOP ORDER PLACED*\n" \
-                  f"\U0001F53C Trigger: `${stop_price}`\n" \
+        message = f"\U0001F680 *{side.upper()} STOP LIMIT ORDER PLACED*\n" \
+                  f"\U0001F53C Stop Price: `${stop_price}`\n" \
+                  f"\U0001F3AF Limit Price: `${limit_price}`\n" \
                   f"\U0001F4CF Size: `{contracts}` contracts ({size} BTC)\n" \
                   f"\U0001F3AF Symbol: `{SYMBOL}`\n" \
-                  f"\u23F3 Waiting for stop trigger to place SL..."
+                  f"\u23F3 Will auto-cancel in 90 minutes if not filled..."
         log_and_notify(message)
         return order_id
     else:
-        error_msg = f"❌ *FAILED TO PLACE {side.upper()} STOP ORDER*\n" \
+        error_msg = f"❌ *FAILED TO PLACE {side.upper()} STOP LIMIT ORDER*\n" \
                     f"\U0001F53C Stop Price: `${stop_price}`\n" \
+                    f"\U0001F3AF Limit Price: `${limit_price}`\n" \
                     f"🚨 Error: `{result}`"
         log_and_notify(error_msg, "error")
         return None
+
 def place_stop_loss_order(original_side, stop_price, size):
     """Place stop loss order after main order is filled"""
     sl_side = "sell" if original_side == "buy" else "buy"
@@ -190,13 +202,14 @@ def place_stop_loss_order(original_side, stop_price, size):
         return None
 
 def monitor_order_and_place_sl(order_id, original_side, stop_loss_price, contracts):
-    """Monitor order fill status and place SL when filled"""
-    max_attempts = 300  # 5 minutes with 1-second intervals
+    """Monitor order fill status and place SL when filled - with 90 minute auto-cancel"""
+    max_attempts = 5400  # 90 minutes with 1-second intervals (90 * 60 = 5400)
     attempt = 0
     
     message = f"👀 *MONITORING ORDER FILL*\n" \
              f"📊 Order ID: `{order_id}`\n" \
-             f"⏱️ Checking every second for fill status..."
+             f"⏱️ Auto-cancel in 90 minutes if not filled\n" \
+             f"🔍 Checking every second for fill status..."
     log_and_notify(message)
     
     while attempt < max_attempts:
@@ -240,12 +253,22 @@ def monitor_order_and_place_sl(order_id, original_side, stop_loss_price, contrac
                 
                 elif state == 'partially_filled' and filled_size > 0:
                     # Continue monitoring for full fill
-                    if attempt % 30 == 0:  # Log every 30 seconds for partial fills
+                    if attempt % 300 == 0:  # Log every 5 minutes for partial fills
+                        remaining_minutes = (max_attempts - attempt) // 60
                         message = f"⏳ *ORDER PARTIALLY FILLED*\n" \
                                  f"📊 Order ID: `{order_id}`\n" \
                                  f"📏 Filled: `{filled_size}` contracts\n" \
-                                 f"⏱️ Waiting for complete fill..."
+                                 f"⏱️ Auto-cancel in {remaining_minutes} minutes if not fully filled..."
                         log_and_notify(message)
+            
+            # Log progress every 15 minutes
+            if attempt > 0 and attempt % 900 == 0:  # Every 15 minutes
+                remaining_minutes = (max_attempts - attempt) // 60
+                message = f"⏰ *ORDER MONITORING UPDATE*\n" \
+                         f"📊 Order ID: `{order_id}`\n" \
+                         f"⏱️ Auto-cancel in {remaining_minutes} minutes\n" \
+                         f"🔍 Still waiting for fill..."
+                log_and_notify(message)
             
             time.sleep(1)  # Check every second
             attempt += 1
@@ -255,25 +278,24 @@ def monitor_order_and_place_sl(order_id, original_side, stop_loss_price, contrac
             time.sleep(1)
             attempt += 1
     
-    # If max attempts reached (order not filled in 5 minutes)
-if attempt >= max_attempts:
-    message = f"⏰ *ORDER MONITORING TIMEOUT*\n" \
-             f"📊 Order ID: `{order_id}`\n" \
-             f"⚠️ Not filled within 5 minutes\n" \
-             f"🗑️ Attempting to cancel the order automatically..."
-    log_and_notify(message, "warning")
+    # If max attempts reached (order not filled in 90 minutes)
+    if attempt >= max_attempts:
+        message = f"⏰ *90 MINUTE TIMEOUT REACHED*\n" \
+                 f"📊 Order ID: `{order_id}`\n" \
+                 f"⚠️ Not filled within 90 minutes\n" \
+                 f"🗑️ Auto-cancelling the order now..."
+        log_and_notify(message, "warning")
 
-    # Try canceling the order
-    cancel_result = make_api_request('DELETE', f'/orders/{order_id}')
-    if cancel_result and cancel_result.get('success'):
-        log_and_notify(f"✅ *ORDER CANCELLED SUCCESSFULLY*\n📊 Order ID: `{order_id}`")
-    else:
-        log_and_notify(f"❌ *FAILED TO CANCEL ORDER*\n📊 Order ID: `{order_id}`", "error")
+        # Try canceling the order
+        cancel_result = make_api_request('DELETE', f'/orders/{order_id}')
+        if cancel_result and cancel_result.get('success'):
+            log_and_notify(f"✅ *ORDER AUTO-CANCELLED*\n📊 Order ID: `{order_id}`\n⏰ Reason: 90 minute timeout")
+        else:
+            log_and_notify(f"❌ *FAILED TO AUTO-CANCEL ORDER*\n📊 Order ID: `{order_id}`", "error")
 
-    # Clean up pending SL tracker
-    if order_id in pending_stop_losses:
-        del pending_stop_losses[order_id]
-
+        # Clean up pending SL tracker
+        if order_id in pending_stop_losses:
+            del pending_stop_losses[order_id]
 
 def cancel_all_orders():
     """Cancel all open orders for the symbol"""
@@ -378,11 +400,13 @@ def webhook():
             message = f"🟢 *LONG ENTRY SIGNAL RECEIVED*\n" \
                      f"💰 Entry Price: `${entry_price}`\n" \
                      f"🛡️ Stop Loss: `${stop_loss}`\n" \
-                     f"📏 Size: `{LOT_SIZE}` BTC"
+                     f"📏 Size: `{LOT_SIZE}` BTC\n" \
+                     f"📋 Order Type: Stop Limit Order"
             log_and_notify(message)
             
             cancel_all_orders()
-            order_id = place_limit_order('buy', entry_price, LOT_SIZE)
+            # Place stop limit order - buy when price goes above entry_price
+            order_id = place_stop_limit_order('buy', entry_price, entry_price, LOT_SIZE)
             if order_id:
                 active_orders['long'] = order_id
                 current_position = 'long_pending'
@@ -407,11 +431,13 @@ def webhook():
             message = f"🔴 *SHORT ENTRY SIGNAL RECEIVED*\n" \
                      f"💰 Entry Price: `${entry_price}`\n" \
                      f"🛡️ Stop Loss: `${stop_loss}`\n" \
-                     f"📏 Size: `{LOT_SIZE}` BTC"
+                     f"📏 Size: `{LOT_SIZE}` BTC\n" \
+                     f"📋 Order Type: Stop Limit Order"
             log_and_notify(message)
             
             cancel_all_orders()
-            order_id = place_limit_order('sell', entry_price, LOT_SIZE)
+            # Place stop limit order - sell when price goes below entry_price
+            order_id = place_stop_limit_order('sell', entry_price, entry_price, LOT_SIZE)
             if order_id:
                 active_orders['short'] = order_id
                 current_position = 'short_pending'
@@ -492,7 +518,8 @@ def status():
                  f"📈 Current Position: `{current_position or 'None'}`\n" \
                  f"📋 Open Orders: `{len(open_orders)}`\n" \
                  f"🛡️ Stop Loss Orders: `{len(stop_loss_orders)}`\n" \
-                 f"⏳ Pending SL Orders: `{len(pending_stop_losses)}`"
+                 f"⏳ Pending SL Orders: `{len(pending_stop_losses)}`\n" \
+                 f"⏰ Auto-cancel: 90 minutes"
         
         if current_pos:
             pos_size = current_pos.get('size', 0)
@@ -524,7 +551,9 @@ def test_telegram():
     test_message = "🧪 *TEST MESSAGE*\n" \
                   f"🤖 Bot is working correctly!\n" \
                   f"🎯 Symbol: `{SYMBOL}`\n" \
-                  f"📏 Lot Size: `{LOT_SIZE}` BTC"
+                  f"📏 Lot Size: `{LOT_SIZE}` BTC\n" \
+                  f"⏰ Auto-cancel: 90 minutes\n" \
+                  f"📋 Order Type: Stop Limit Orders"
     
     send_telegram_message(test_message)
     return jsonify({"status": "success", "message": "Test message sent to Telegram"})
@@ -533,18 +562,22 @@ if __name__ == '__main__':
     startup_message = f"🚀 *DELTA TRADING BOT STARTED*\n" \
                      f"🎯 Symbol: `{SYMBOL}`\n" \
                      f"📏 Lot Size: `{LOT_SIZE}` BTC\n" \
+                     f"📋 Order Type: Stop Limit Orders\n" \
+                     f"⏰ Auto-cancel: 90 minutes\n" \
                      f"🌐 Webhook: `http://localhost:5000/webhook`\n" \
                      f"📊 Status: `http://localhost:5000/status`\n" \
                      f"🗑️ Cancel All: `http://localhost:5000/cancel_all`\n" \
-                     f"✨ *NEW: SL placed AFTER order fill*"
+                     f"✨ *NEW: Stop Limit + 90min auto-cancel*"
     
     send_telegram_message(startup_message)
     
     logger.info("🚀 Starting Delta Exchange Trading Bot...")
     logger.info(f"📊 Trading Symbol: {SYMBOL}")
     logger.info(f"📏 Lot Size: {LOT_SIZE} BTC")
+    logger.info("📋 Order Type: Stop Limit Orders")
+    logger.info("⏰ Auto-cancel timeout: 90 minutes")
     logger.info("🌐 Webhook endpoint: http://localhost:5000/webhook")
     logger.info("📱 Telegram notifications enabled")
-    logger.info("✨ Stop Loss will be placed AFTER limit order fills")
+    logger.info("✨ Stop Loss will be placed AFTER stop limit order fills")
     
     app.run(host='0.0.0.0', port=5000, debug=False)
