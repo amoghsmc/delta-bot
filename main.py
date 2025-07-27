@@ -524,4 +524,81 @@ def status():
         status_data = {
             "current_position": current_position,
             "active_orders": active_orders,
+            "stop_loss_orders": stop_loss_orders,
+            "pending_stop_losses": pending_stop_losses,
+            "open_orders_count": len(open_orders),
+            "position_details": current_pos
+        }
+        
+        message = f"📊 *TRADING STATUS*\n" \
+                 f"🎯 Symbol: `{SYMBOL}`\n" \
+                 f"📈 Current Position: `{current_position or 'None'}`\n" \
+                 f"📋 Open Orders: `{len(open_orders)}`\n" \
+                 f"🛡️ Stop Loss Orders: `{len(stop_loss_orders)}`\n" \
+                 f"⏳ Pending SL Orders: `{len(pending_stop_losses)}`\n" \
+                 f"⏰ Auto-cancel: 90 minutes"
+        
+        if current_pos:
+            pos_size = current_pos.get('size', 0)
+            pos_value = abs(pos_size) * 0.001
+            message += f"\n💰 Position Size: `{pos_size}` contracts ({pos_value} BTC)"
+        
+        send_telegram_message(message)
+        return jsonify(status_data)
+    
+    except Exception as e:
+        error_msg = f"❌ *STATUS ERROR*\n🚨 Error: `{str(e)}`"
+        log_and_notify(error_msg, "error")
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+@app.route('/cancel_all', methods=['POST'])
+def cancel_all():
+    """Cancel all orders endpoint"""
+    try:
+        cancel_all_orders()
+        return jsonify({"status": "success", "message": "All orders cancelled"})
+    except Exception as e:
+        error_msg = f"❌ *CANCEL ALL ERROR*\n🚨 Error: `{str(e)}`"
+        log_and_notify(error_msg, "error")
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+@app.route('/test_telegram', methods=['GET'])
+def test_telegram():
+    """Test Telegram integration"""
+    test_message = "🧪 *TEST MESSAGE*\n" \
+                  f"🤖 Bot is working correctly!\n" \
+                  f"🎯 Symbol: `{SYMBOL}`\n" \
+                  f"📏 Lot Size: `{LOT_SIZE}` BTC\n" \
+                  f"⏰ Auto-cancel: 90 minutes\n" \
+                  f"📋 Order Type: Stop Limit Orders\n" \
+                  f"🎯 SMC Integration: Active"
+    
+    send_telegram_message(test_message)
+    return jsonify({"status": "success", "message": "Test message sent to Telegram"})
+
+if __name__ == '__main__':
+    startup_message = f"🚀 *DELTA TRADING BOT STARTED*\n" \
+                     f"🎯 Symbol: `{SYMBOL}`\n" \
+                     f"📏 Lot Size: `{LOT_SIZE}` BTC\n" \
+                     f"📋 Order Type: Stop Limit Orders\n" \
+                     f"⏰ Auto-cancel: 90 minutes\n" \
+                     f"🎯 SMC Integration: Active\n" \
+                     f"🌐 Webhook: `http://localhost:5000/webhook`\n" \
+                     f"📊 Status: `http://localhost:5000/status`\n" \
+                     f"🗑️ Cancel All: `http://localhost:5000/cancel_all`\n" \
+                     f"✨ *NEW: AMOGH SMC Strategy Integration*"
+    
+    send_telegram_message(startup_message)
+    
+    logger.info("🚀 Starting Delta Exchange Trading Bot...")
+    logger.info(f"📊 Trading Symbol: {SYMBOL}")
+    logger.info(f"📏 Lot Size: {LOT_SIZE} BTC")
+    logger.info("📋 Order Type: Stop Limit Orders")
+    logger.info("⏰ Auto-cancel timeout: 90 minutes")
+    logger.info("🎯 SMC Integration: Active")
+    logger.info("🌐 Webhook endpoint: http://localhost:5000/webhook")
+    logger.info("📱 Telegram notifications enabled")
+    logger.info("✨ AMOGH SMC Strategy Integration Ready")
+    
+    app.run(host='0.0.0.0', port=5000, debug=False)
             
