@@ -110,9 +110,16 @@ def make_api_request(method, endpoint, payload='', params=None):
         return response.json()
     
     except requests.exceptions.RequestException as e:
-        error_msg = f"API request failed: {e}"
-        log_and_notify(error_msg, "error")
-        return None
+    if isinstance(e, requests.exceptions.HTTPError) and e.response is not None:
+        error_text = e.response.text
+        status_code = e.response.status_code
+        reason = e.response.reason
+        error_msg = f"❌ API request failed: {status_code} {reason} | {error_text}"
+    else:
+        error_msg = f"❌ API request failed: {e}"
+    log_and_notify(error_msg, "error")
+    return None
+
 
 def get_order_status(order_id):
     """Get order status by order ID"""
