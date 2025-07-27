@@ -17,12 +17,12 @@ app = Flask(__name__)
 
 # Delta Exchange API Configuration
 BASE_URL = 'https://api.india.delta.exchange'
-API_KEY = 'your_api_key_here'  # Replace with your actual API key
-API_SECRET = 'your_api_secret_here'  # Replace with your actual API secret
+API_KEY = 'NWczUdbI9vVbBlCASC0rRFolMpPM32'  # Replace with your actual API key
+API_SECRET = 'YTN79e7x2vuLSYzGW7YUBMnZNJEXTDPxsMaEpH0ZwXptQRwl9zjEby0Z8oAp'  # Replace with your actual API secret
 
 # Telegram Configuration
-TELEGRAM_BOT_TOKEN = 'your_telegram_bot_token'  # Replace with your actual bot token
-TELEGRAM_CHAT_ID = 'your_chat_id'  # Replace with your actual chat ID
+TELEGRAM_BOT_TOKEN = '8068558939:AAHcsThdbt0J1uzI0mT140H9vJXbcaVZ9Jk'  # Replace with your actual bot token
+TELEGRAM_CHAT_ID = '871704959'  # Replace with your actual chat ID
 TELEGRAM_API_URL = f'https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage'
 
 # Trading Configuration
