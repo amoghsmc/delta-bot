@@ -525,6 +525,8 @@ def close_position(symbol=None):
         "order_type": "market_order",
         "reduce_only": "true"
     }
+log_and_notify(f"⚙️ Preparing to close position for SYMBOL: {symbol}")
+log_and_notify(f"📦 Payload to send: {json.dumps(close_order_data)}")
 
     payload = json.dumps(close_order_data)
     result = make_api_request('POST', '/orders', payload)
