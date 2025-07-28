@@ -174,120 +174,76 @@ def place_stop_limit_order(side, stop_price, limit_price, size):
         log_and_notify(error_msg, "error")
         return None
 
-
-def place_stop_loss_order(original_side, stop_price, size):
-    """Place stop loss order after main order is filled"""
-    sl_side = "sell" if original_side == "buy" else "buy"
-    
-    sl_order_data = {
-        "product_symbol": SYMBOL,
-        "size": size,
-        "side": sl_side,
-        "order_type": "market_order",
-        "stop_order_type": "stop_loss_order",
-        "stop_price": str(stop_price),
-        "stop_trigger_method": "mark_price",
-        "reduce_only": "true"
-    }
-    
-    payload = json.dumps(sl_order_data)
-    result = make_api_request('POST', '/orders', payload)
-    
-    if result and result.get('success'):
-        sl_order_id = result['result']['id']
-        message = f"🛡️ *STOP LOSS ORDER PLACED*\n" \
-                 f"📊 SL Order ID: `{sl_order_id}`\n" \
-                 f"🎯 Stop Price: `${stop_price}`\n" \
-                 f"📏 Size: `{size}` contracts\n" \
-                 f"✅ Main order was filled successfully"
-        
-        log_and_notify(message)
-        return sl_order_id
-    else:
-        error_msg = f"❌ *FAILED TO PLACE STOP LOSS*\n" \
-                   f"🎯 Stop Price: `${stop_price}`\n" \
-                   f"🚨 Error: `{result}`"
-        log_and_notify(error_msg, "error")
-        return None
-
 def monitor_order_and_place_sl(order_id, original_side, stop_loss_price, contracts):
-    """Monitor order fill status and place SL when filled - with 90 minute auto-cancel"""
-    max_attempts = 5400  # 90 minutes with 1-second intervals (90 * 60 = 5400)
+    """Monitor order fill status and wait for PineScript to trigger SL"""
+    max_attempts = 5400  # 90 minutes with 1-second intervals
     attempt = 0
-    
+
     message = f"👀 *MONITORING ORDER FILL*\n" \
              f"📊 Order ID: `{order_id}`\n" \
              f"⏱️ Auto-cancel in 90 minutes if not filled\n" \
              f"🔍 Checking every second for fill status..."
     log_and_notify(message)
-    
+
     while attempt < max_attempts:
         try:
             order_status = get_order_status(order_id)
-            
+
             if order_status:
                 state = order_status.get('state')
                 filled_size = order_status.get('size_filled', 0)
-                
+
                 logger.info(f"Order {order_id} - State: {state}, Filled: {filled_size}")
-                
+
                 if state == 'filled':
                     message = f"✅ *ORDER FILLED SUCCESSFULLY*\n" \
                              f"📊 Order ID: `{order_id}`\n" \
                              f"📏 Filled Size: `{filled_size}` contracts\n" \
-                             f"🛡️ Now placing Stop Loss..."
+                             f"🛡️ SL will now be triggered by PineScript alert"
                     log_and_notify(message)
-                    
-                    # Place stop loss order
-                    sl_order_id = place_stop_loss_order(original_side, stop_loss_price, filled_size)
-                    
-                    if sl_order_id:
-                        stop_loss_orders[order_id] = sl_order_id
-                        # Remove from pending
-                        if order_id in pending_stop_losses:
-                            del pending_stop_losses[order_id]
-                    
-                    break
-                    
-                elif state == 'cancelled' or state == 'rejected':
-                    message = f"❌ *ORDER {state.upper()}*\n" \
-                             f"📊 Order ID: `{order_id}`\n" \
-                             f"🚫 Stop Loss will not be placed"
-                    log_and_notify(message, "warning")
-                    
+
                     # Remove from pending
                     if order_id in pending_stop_losses:
                         del pending_stop_losses[order_id]
                     break
-                
+
+                elif state in ['cancelled', 'rejected']:
+                    message = f"❌ *ORDER {state.upper()}*\n" \
+                             f"📊 Order ID: `{order_id}`\n" \
+                             f"🚫 SL will not be placed"
+                    log_and_notify(message, "warning")
+
+                    # Remove from pending
+                    if order_id in pending_stop_losses:
+                        del pending_stop_losses[order_id]
+                    break
+
                 elif state == 'partially_filled' and filled_size > 0:
-                    # Continue monitoring for full fill
-                    if attempt % 300 == 0:  # Log every 5 minutes for partial fills
+                    if attempt % 300 == 0:  # Log every 5 minutes
                         remaining_minutes = (max_attempts - attempt) // 60
                         message = f"⏳ *ORDER PARTIALLY FILLED*\n" \
                                  f"📊 Order ID: `{order_id}`\n" \
                                  f"📏 Filled: `{filled_size}` contracts\n" \
-                                 f"⏱️ Auto-cancel in {remaining_minutes} minutes if not fully filled..."
+                                 f"⏱️ Auto-cancel in {remaining_minutes} minutes"
                         log_and_notify(message)
-            
-            # Log progress every 15 minutes
-            if attempt > 0 and attempt % 900 == 0:  # Every 15 minutes
+
+            # 15-minute update
+            if attempt > 0 and attempt % 900 == 0:
                 remaining_minutes = (max_attempts - attempt) // 60
                 message = f"⏰ *ORDER MONITORING UPDATE*\n" \
                          f"📊 Order ID: `{order_id}`\n" \
-                         f"⏱️ Auto-cancel in {remaining_minutes} minutes\n" \
-                         f"🔍 Still waiting for fill..."
+                         f"⏱️ Auto-cancel in {remaining_minutes} minutes"
                 log_and_notify(message)
-            
-            time.sleep(1)  # Check every second
+
+            time.sleep(1)
             attempt += 1
-            
+
         except Exception as e:
             logger.error(f"Error monitoring order {order_id}: {e}")
             time.sleep(1)
             attempt += 1
-    
-    # If max attempts reached (order not filled in 90 minutes)
+
+    # Auto-cancel if time exceeds
     if attempt >= max_attempts:
         message = f"⏰ *90 MINUTE TIMEOUT REACHED*\n" \
                  f"📊 Order ID: `{order_id}`\n" \
@@ -295,16 +251,17 @@ def monitor_order_and_place_sl(order_id, original_side, stop_loss_price, contrac
                  f"🗑️ Auto-cancelling the order now..."
         log_and_notify(message, "warning")
 
-        # Try canceling the order
         cancel_result = make_api_request('DELETE', f'/orders/{order_id}')
         if cancel_result and cancel_result.get('success'):
-            log_and_notify(f"✅ *ORDER AUTO-CANCELLED*\n📊 Order ID: `{order_id}`\n⏰ Reason: 90 minute timeout")
+            log_and_notify(f"✅ *ORDER AUTO-CANCELLED*\n📊 Order ID: `{order_id}`")
         else:
             log_and_notify(f"❌ *FAILED TO AUTO-CANCEL ORDER*\n📊 Order ID: `{order_id}`", "error")
 
-        # Clean up pending SL tracker
         if order_id in pending_stop_losses:
             del pending_stop_losses[order_id]
+
+
+
 
 def cancel_all_orders():
     """Cancel all open orders for the symbol"""
