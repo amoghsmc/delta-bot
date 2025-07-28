@@ -166,18 +166,21 @@ def get_position_data():
         
         # ✅ Method 1: Use /positions with REQUIRED product_id parameter
         logger.info(f"🔍 Getting position for product_id={PRODUCT_ID}...")
-        params = {"product_id": PRODUCT_ID}  # This is REQUIRED
+        params = {"product_id": PRODUCT_ID}  # ✅ This is REQUIRED
         result = make_api_request('GET', '/positions', params=params)
         
         if result and result.get('success'):
             position_data = result.get('result')
             logger.info(f"✅ Got position data: {position_data}")
-            if position_data and position_data.get('size') != 0:
+            if position_data and position_data.get('size', 0) != 0:
                 return position_data
+            else:
+                logger.info("ℹ️ No open position found (size is 0)")
+                return None
         
-        # ✅ Method 2: Use /positions/margined (fallback - optional params)
+        # ✅ Method 2: Use /positions/margined as fallback
         logger.info("🔍 Trying /positions/margined as fallback...")
-        params = {"product_ids": str(PRODUCT_ID)}  # Optional but safer to provide
+        params = {"product_ids": str(PRODUCT_ID)}
         result = make_api_request('GET', '/positions/margined', params=params)
         
         if result and result.get('success'):
@@ -186,13 +189,17 @@ def get_position_data():
             
             for pos in positions:
                 logger.info(f"🔍 Position: {pos.get('product_symbol', 'N/A')} | Size: {pos.get('size', 0)} | ID: {pos.get('product_id', 'N/A')}")
-                # Check both symbol and product_id for exact match
-                if (pos.get('product_symbol') == SYMBOL or pos.get('product_id') == PRODUCT_ID) and pos.get('size') != 0:
+                if (pos.get('product_symbol') == SYMBOL or pos.get('product_id') == PRODUCT_ID) and pos.get('size', 0) != 0:
                     logger.info(f"✅ Found matching position: {pos}")
                     return pos
         
         logger.info("ℹ️ No open position found")
         return None
+        
+    except Exception as e:
+        logger.error(f"❌ Error getting position data: {e}")
+        return None
+
         
     except Exception as e:
         logger.error(f"❌ Error getting position data: {e}")
@@ -640,9 +647,9 @@ def status():
         if orders_result and orders_result.get('success'):
             open_orders = orders_result.get('result', [])
         
-                # ✅ Position details
+        # ✅ Position details
         position_info = "None"
-        if current_pos and current_pos.get('size') != 0:
+        if current_pos and current_pos.get('size', 0) != 0:
             pos_size = current_pos.get('size', 0)
             entry_price = current_pos.get('entry_price', 'N/A')
             unrealized_pnl = current_pos.get('unrealized_pnl', 'N/A')
@@ -686,6 +693,7 @@ def status():
         error_msg = f"❌ *STATUS ERROR*\n🚨 Error: `{str(e)}`"
         log_and_notify(error_msg, "error")
         return jsonify({"status": "error", "message": str(e)}), 500
+
 
 @app.route('/cancel_all', methods=['POST'])
 def cancel_all_endpoint():
