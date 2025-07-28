@@ -77,6 +77,10 @@ def generate_signature(secret, message):
 
 def make_api_request(method, endpoint, payload='', params=None):
     """Make authenticated API request to Delta Exchange"""
+    logger.info(f"🔍 API CALL → {method} {url}")
+logger.info(f"🔍 Payload → {payload}")
+logger.info(f"🔍 Params  → {params}")
+
     timestamp = str(int(time.time()))
     path = f'/v2{endpoint}'
     url = f'{BASE_URL}{path}'
@@ -160,6 +164,8 @@ def place_stop_limit_order(side, stop_price, limit_price, size):
         "stop_price": str(stop_price),
         "stop_trigger_method": "mark_price"
     }
+    logger.info(f"✅ Order Data: {order_data}")
+
 
     payload = json.dumps(order_data)
     result = make_api_request('POST', '/orders', payload)
@@ -337,6 +343,8 @@ def close_position():
         "order_type": "market_order",
         "reduce_only": "true"
     }
+    logger.info(f"✅ Close Order Data: {close_order_data}")
+
     
     payload = json.dumps(close_order_data)
     result = make_api_request('POST', '/orders', payload)
