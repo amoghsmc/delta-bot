@@ -132,23 +132,24 @@ def place_stop_limit_order(side, stop_price, limit_price, size):
     """Place a stop-limit order (Buy/Sell Stop Limit)"""
     contracts = int(size * 1000)
     stop_side = side.lower()
-    
-    # For stop limit order, we need to determine stop_order_type
-    if side.lower() == "buy":
-        # Buy stop limit - triggers when price goes above stop_price
-        stop_order_type = "take_profit_order"  # Used for buy stops
+
+    # Offset for gap between stop and limit
+    gap = 50
+    if stop_side == "buy":
+        stop_order_type = "take_profit_order"
+        limit_price = stop_price + gap  # BUY: limit price above stop
     else:
-        # Sell stop limit - triggers when price goes below stop_price  
-        stop_order_type = "stop_loss_order"   # Used for sell stops
+        stop_order_type = "stop_loss_order"
+        limit_price = stop_price - gap  # SELL: limit price below stop
 
     order_data = {
         "product_symbol": SYMBOL,
         "size": contracts,
         "side": stop_side,
-        "order_type": "limit_order",  # This makes it a limit order
-        "limit_price": str(limit_price),  # Price at which order executes after trigger
+        "order_type": "limit_order",
+        "limit_price": str(limit_price),
         "stop_order_type": stop_order_type,
-        "stop_price": str(stop_price),  # Trigger price
+        "stop_price": str(stop_price),
         "stop_trigger_method": "mark_price"
     }
 
@@ -157,21 +158,22 @@ def place_stop_limit_order(side, stop_price, limit_price, size):
 
     if result and result.get('success'):
         order_id = result['result']['id']
-        message = f"\U0001F680 *{side.upper()} STOP LIMIT ORDER PLACED*\n" \
-                  f"\U0001F53C Stop Price: `${stop_price}`\n" \
-                  f"\U0001F3AF Limit Price: `${limit_price}`\n" \
-                  f"\U0001F4CF Size: `{contracts}` contracts ({size} BTC)\n" \
-                  f"\U0001F3AF Symbol: `{SYMBOL}`\n" \
-                  f"\u23F3 Will auto-cancel in 90 minutes if not filled..."
+        message = f"🚀 *{side.upper()} STOP LIMIT ORDER PLACED*\n" \
+                  f"🔼 Stop Price: `${stop_price}`\n" \
+                  f"🎯 Limit Price: `${limit_price}`\n" \
+                  f"📏 Size: `{contracts}` contracts ({size} BTC)\n" \
+                  f"🎯 Symbol: `{SYMBOL}`\n" \
+                  f"⏳ Will auto-cancel in 90 minutes if not filled..."
         log_and_notify(message)
         return order_id
     else:
         error_msg = f"❌ *FAILED TO PLACE {side.upper()} STOP LIMIT ORDER*\n" \
-                    f"\U0001F53C Stop Price: `${stop_price}`\n" \
-                    f"\U0001F3AF Limit Price: `${limit_price}`\n" \
+                    f"🔼 Stop Price: `${stop_price}`\n" \
+                    f"🎯 Limit Price: `${limit_price}`\n" \
                     f"🚨 Error: `{result}`"
         log_and_notify(error_msg, "error")
         return None
+
 
 def place_stop_loss_order(original_side, stop_price, size):
     """Place stop loss order after main order is filled"""
