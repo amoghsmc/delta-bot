@@ -113,6 +113,10 @@ def make_api_request(method, endpoint, payload='', params=None):
     if isinstance(e, requests.exceptions.HTTPError) and e.response is not None:
         error_text = e.response.text
         status_code = e.response.status_code
+        logger.error(f"API request failed: {status_code} - {error_text}")
+    else:
+        logger.error(f"API request failed: {str(e)}")
+    return None
         reason = e.response.reason
         error_msg = f"❌ API request failed: {status_code} {reason} | {error_text}"
     else:
