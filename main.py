@@ -239,7 +239,7 @@ def place_entry_order(side, entry_price, size):
             "limit_price": formatted_price,
             "time_in_force": "gtc"  # Good till cancelled
         }
-        
+        log_and_notify(f"🧪 Entry Order Payload: {json.dumps(order_data)}")
         logger.info(f"✅ Placing order: {order_data}")
         payload = json.dumps(order_data)
         result = make_api_request('POST', '/orders', payload)
