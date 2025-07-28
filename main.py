@@ -499,37 +499,41 @@ def cancel_all_orders():
     except Exception as e:
         logger.error(f"❌ Error cancelling orders: {e}")
 
-def close_position():
+def close_position(symbol=None):
     """Close current position"""
     global current_position
-    
+
     position_data = get_position_data()
-    
+
     if not position_data or position_data.get('size') == 0:
         message = "ℹ️ *NO POSITION TO CLOSE*"
         log_and_notify(message)
         current_position = None
         return
-    
+
     position_size = abs(int(position_data['size']))
     close_side = "sell" if position_data['size'] > 0 else "buy"
-    
+
+    # ✅ Use passed symbol or fallback to default
+    symbol = symbol or SYMBOL
+    product_id = f"{symbol}-PERP"
+
     close_order_data = {
-        "product_id": PRODUCT_ID,
+        "product_id": product_id,
         "size": position_size,
         "side": close_side,
         "order_type": "market_order",
         "reduce_only": "true"
     }
-    
+
     payload = json.dumps(close_order_data)
     result = make_api_request('POST', '/orders', payload)
-    
+
     if result and result.get('success'):
         message = f"🚪 *POSITION CLOSED*\n" \
-                 f"📏 Size: `{position_size}` contracts\n" \
-                 f"🔄 Side: `{close_side.upper()}`\n" \
-                 f"💰 Entry Price: `${position_data.get('entry_price', 'N/A')}`"
+                  f"📏 Size: `{position_size}` contracts\n" \
+                  f"🔄 Side: `{close_side.upper()}`\n" \
+                  f"💰 Entry Price: `${position_data.get('entry_price', 'N/A')}`"
         log_and_notify(message)
         current_position = None
         cancel_all_orders()
@@ -537,160 +541,98 @@ def close_position():
         error_msg = f"❌ *FAILED TO CLOSE POSITION*\n🚨 Error: `{result}`"
         log_and_notify(error_msg, "error")
 
+
 @app.route('/webhook', methods=['POST'])
 def webhook():
     """Handle TradingView webhook alerts - ENHANCED VERSION"""
     global current_position, active_orders, pending_stop_losses
-    
+
     try:
         data = request.get_json()
         logger.info(f"📨 Received alert: {data}")
-        
+
         alert_type = data.get('alert_type')
         entry_price = float(data.get('entry_price', 0))
         stop_loss = float(data.get('stop_loss', 0))
         lot_size_from_alert = float(data.get('lot_size', LOT_SIZE))
-        
+        symbol = data.get("symbol", SYMBOL)  # ✅ extract symbol for product_id creation
+
         # ✅ Get current price for context
         current_price = get_current_price()
-        
+
         if alert_type == 'LONG_ENTRY':
             message = f"🟢 *LONG ENTRY SIGNAL RECEIVED*\n" \
-                     f"📊 Current Price: `${current_price or 'N/A'}`\n" \
-                     f"💰 Entry Price: `${entry_price}`\n" \
-                     f"🛡️ Stop Loss: `${stop_loss}`\n" \
-                     f"📏 Size: `{lot_size_from_alert}` BTC\n" \
-                     f"📈 Strategy: Limit order will execute when price comes to `${entry_price}`"
+                      f"📊 Current Price: `${current_price or 'N/A'}`\n" \
+                      f"💰 Entry Price: `${entry_price}`\n" \
+                      f"🛡️ Stop Loss: `${stop_loss}`\n" \
+                      f"📏 Size: `{lot_size_from_alert}` BTC\n" \
+                      f"📈 Strategy: Limit order will execute when price comes to `${entry_price}`"
             log_and_notify(message)
-            
+
             cancel_all_orders()
-            # ✅ Place limit order for long entry (your strategy)
             order_id = place_entry_order('buy', entry_price, lot_size_from_alert)
             if order_id:
                 active_orders['long'] = order_id
                 current_position = 'long_pending'
-                
+
                 contracts = int(lot_size_from_alert * 1000)
                 pending_stop_losses[order_id] = {
                     'side': 'buy',
                     'stop_price': stop_loss,
                     'contracts': contracts
                 }
-                
+
                 monitor_thread = threading.Thread(
                     target=monitor_order_and_place_sl,
                     args=(order_id, 'buy', stop_loss, contracts)
                 )
                 monitor_thread.daemon = True
                 monitor_thread.start()
-            
+
         elif alert_type == 'SHORT_ENTRY':
             message = f"🔴 *SHORT ENTRY SIGNAL RECEIVED*\n" \
-                     f"📊 Current Price: `${current_price or 'N/A'}`\n" \
-                     f"💰 Entry Price: `${entry_price}`\n" \
-                     f"🛡️ Stop Loss: `${stop_loss}`\n" \
-                     f"📏 Size: `{lot_size_from_alert}` BTC\n" \
-                     f"📉 Strategy: Limit order will execute when price comes to `${entry_price}`"
+                      f"📊 Current Price: `${current_price or 'N/A'}`\n" \
+                      f"💰 Entry Price: `${entry_price}`\n" \
+                      f"🛡️ Stop Loss: `${stop_loss}`\n" \
+                      f"📏 Size: `{lot_size_from_alert}` BTC\n" \
+                      f"📉 Strategy: Limit order will execute when price comes to `${entry_price}`"
             log_and_notify(message)
-            
+
             cancel_all_orders()
-            # ✅ Place limit order for short entry (your strategy)
             order_id = place_entry_order('sell', entry_price, lot_size_from_alert)
             if order_id:
                 active_orders['short'] = order_id
                 current_position = 'short_pending'
-                
+
                 contracts = int(lot_size_from_alert * 1000)
                 pending_stop_losses[order_id] = {
                     'side': 'sell',
                     'stop_price': stop_loss,
                     'contracts': contracts
                 }
-                
+
                 monitor_thread = threading.Thread(
                     target=monitor_order_and_place_sl,
                     args=(order_id, 'sell', stop_loss, contracts)
                 )
                 monitor_thread.daemon = True
                 monitor_thread.start()
-        
+
         elif alert_type in ['LONG_EXIT', 'SHORT_EXIT']:
             message = f"🚪 *{alert_type.replace('_', ' ')} SIGNAL RECEIVED*\n" \
-                     f"📊 Current Price: `${current_price or 'N/A'}`"
+                      f"📊 Current Price: `${current_price or 'N/A'}`"
             log_and_notify(message)
-            close_position()
-            
+            close_position(symbol)  # ✅ pass symbol to use for product_id
+
         else:
             error_msg = f"⚠️ *UNKNOWN ALERT TYPE: {alert_type}*"
             log_and_notify(error_msg, "warning")
             return jsonify({"status": "error", "message": "Unknown alert type"}), 400
-        
+
         return jsonify({"status": "success", "message": "Alert processed", "current_price": current_price})
-    
+
     except Exception as e:
         error_msg = f"❌ *WEBHOOK ERROR*\n🚨 Error: `{str(e)}`"
-        log_and_notify(error_msg, "error")
-        return jsonify({"status": "error", "message": str(e)}), 500
-
-@app.route('/status', methods=['GET'])
-def status():
-    """Get current trading status - COMPLETE VERSION"""
-    try:
-        current_pos = get_position_data()
-        current_price = get_current_price()
-        
-        # ✅ Fixed orders query with proper parameters
-        params = {"product_ids": str(PRODUCT_ID), "states": "open"}
-        orders_result = make_api_request('GET', '/orders', params=params)
-        open_orders = []
-        
-        if orders_result and orders_result.get('success'):
-            open_orders = orders_result.get('result', [])
-        
-        # ✅ Position details
-        position_info = "None"
-        if current_pos and current_pos.get('size', 0) != 0:
-            pos_size = current_pos.get('size', 0)
-            entry_price = current_pos.get('entry_price', 'N/A')
-            unrealized_pnl = current_pos.get('unrealized_pnl', 'N/A')
-            position_side = "LONG" if pos_size > 0 else "SHORT"
-            position_info = f"{position_side} | Size: {abs(pos_size)} | Entry: ${entry_price} | PnL: ${unrealized_pnl}"
-        
-        # ✅ Orders summary
-        orders_summary = []
-        for order in open_orders:
-            order_type = order.get('order_type', 'unknown')
-            side = order.get('side', 'unknown').upper()
-            price = order.get('limit_price') or order.get('stop_price', 'N/A')
-            size = order.get('unfilled_size', order.get('size', 0))
-            orders_summary.append(f"{side} {order_type} @${price} ({size} contracts)")
-        
-        message = f"📊 *TRADING STATUS*\n" \
-                 f"🎯 Symbol: `{SYMBOL}` (ID: {PRODUCT_ID})\n" \
-                 f"💰 Current Price: `${current_price or 'N/A'}`\n" \
-                 f"📈 Position: `{position_info}`\n" \
-                 f"📋 Open Orders: `{len(open_orders)}`\n" \
-                 f"🛡️ Stop Loss Orders: `{len(stop_loss_orders)}`\n" \
-                 f"⏳ Pending SL: `{len(pending_stop_losses)}`\n" \
-                 f"🤖 Bot Status: `{current_position or 'Idle'}`"
-        
-        if orders_summary:
-            message += f"\n\n📋 *ORDER DETAILS:*\n" + "\n".join([f"• {order}" for order in orders_summary[:5]])
-        
-        log_and_notify(message)
-        
-        return jsonify({
-            "status": "success",
-            "current_price": current_price,
-            "position": current_pos,
-            "open_orders_count": len(open_orders),
-            "stop_loss_orders": len(stop_loss_orders),
-            "pending_stop_losses": len(pending_stop_losses),
-            "bot_status": current_position
-        })
-        
-    except Exception as e:
-        error_msg = f"❌ *STATUS ERROR*\n🚨 Error: `{str(e)}`"
         log_and_notify(error_msg, "error")
         return jsonify({"status": "error", "message": str(e)}), 500
 
