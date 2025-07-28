@@ -209,17 +209,30 @@ def place_entry_order(side, entry_price, size):
     symbol = SYMBOL or "BTCUSD"
     product_id = f"{symbol}-PERP"
 
+    contracts = max(1, int(size * 1000))  # ✅ Minimum 1 contract
+    formatted_price = f"{float(entry_price):.2f}"
+
+    # ✅ Get current price for comparison
+    current_price = get_current_price()
+    if current_price:
+        logger.info(f"🔍 Current price: ${current_price}, Entry price: ${formatted_price}")
+        if side.lower() == 'buy' and float(formatted_price) >= current_price:
+            logger.info(f"ℹ️ Buy limit order at ${formatted_price} is above current price ${current_price} - will wait for price to come down")
+        elif side.lower() == 'sell' and float(formatted_price) <= current_price:
+            logger.info(f"ℹ️ Sell limit order at ${formatted_price} is below current price ${current_price} - will wait for price to come up")
+
+    # ✅ Final order payload
     order_data = {
-        "product_id": product_id,  # ✅ MANDATORY
+        "product_id": product_id,
         "side": side,
-        "size": int(size * 1000),
-        "stop_price": entry_price,
-        "limit_price": entry_price + 50,  # example offset
+        "size": contracts,
+        "stop_price": round(entry_price, 2),
+        "limit_price": round(entry_price + 50, 2),  # Tune this offset
         "order_type": "stop_limit_order",
         "post_only": False
     }
 
-    log_and_notify(f"📤 Sending Entry Order: {json.dumps(order_data)}")  # ✅ Debugging line
+    log_and_notify(f"📤 Sending Entry Order: {json.dumps(order_data)}")
 
     payload = json.dumps(order_data)
     result = make_api_request('POST', '/orders', payload)
@@ -231,21 +244,6 @@ def place_entry_order(side, entry_price, size):
         log_and_notify(f"❌ FAILED TO PLACE ENTRY ORDER\n🚨 Error: {result}")
         return None
 
-            
-        # ✅ Calculate contracts properly
-        contracts = max(1, int(size * 1000))  # Minimum 1 contract
-        formatted_price = f"{float(entry_price):.2f}"
-        
-        # ✅ Get current market price for validation
-        current_price = get_current_price()
-        if current_price:
-            logger.info(f"🔍 Current price: ${current_price}, Entry price: ${formatted_price}")
-            
-            # ✅ Validate order logic for your strategy
-            if side.lower() == 'buy' and float(formatted_price) >= current_price:
-                logger.info(f"ℹ️ Buy limit order at ${formatted_price} is above current price ${current_price} - will wait for price to come down")
-            elif side.lower() == 'sell' and float(formatted_price) <= current_price:
-                logger.info(f"ℹ️ Sell limit order at ${formatted_price} is below current price ${current_price} - will wait for price to come up")
         
         # ✅ PERFECT ORDER DATA FOR YOUR STRATEGY
         order_data = {
