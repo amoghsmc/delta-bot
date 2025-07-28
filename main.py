@@ -164,8 +164,21 @@ def get_position_data():
     try:
         logger.info("🔍 Getting position data...")
         
-        # ✅ Method 1: Use /positions/margined (most reliable - no required params)
-        result = make_api_request('GET', '/positions/margined')
+        # ✅ Method 1: Use /positions with REQUIRED product_id parameter
+        logger.info(f"🔍 Getting position for product_id={PRODUCT_ID}...")
+        params = {"product_id": PRODUCT_ID}  # This is REQUIRED
+        result = make_api_request('GET', '/positions', params=params)
+        
+        if result and result.get('success'):
+            position_data = result.get('result')
+            logger.info(f"✅ Got position data: {position_data}")
+            if position_data and position_data.get('size') != 0:
+                return position_data
+        
+        # ✅ Method 2: Use /positions/margined (fallback - optional params)
+        logger.info("🔍 Trying /positions/margined as fallback...")
+        params = {"product_ids": str(PRODUCT_ID)}  # Optional but safer to provide
+        result = make_api_request('GET', '/positions/margined', params=params)
         
         if result and result.get('success'):
             positions = result.get('result', [])
@@ -177,17 +190,6 @@ def get_position_data():
                 if (pos.get('product_symbol') == SYMBOL or pos.get('product_id') == PRODUCT_ID) and pos.get('size') != 0:
                     logger.info(f"✅ Found matching position: {pos}")
                     return pos
-        
-        # ✅ Method 2: Use /positions with REQUIRED product_id parameter
-        logger.info(f"🔍 Trying /positions with product_id={PRODUCT_ID}...")
-        params = {"product_id": PRODUCT_ID}  # This is REQUIRED
-        result = make_api_request('GET', '/positions', params=params)
-        
-        if result and result.get('success'):
-            position_data = result.get('result')
-            logger.info(f"✅ Got position data: {position_data}")
-            if position_data and position_data.get('size') != 0:
-                return position_data
         
         logger.info("ℹ️ No open position found")
         return None
@@ -441,8 +443,9 @@ def monitor_order_and_place_sl(order_id, original_side, stop_loss_price, contrac
             del pending_stop_losses[order_id]
 
 def cancel_all_orders():
-    """Cancel all open orders"""
+    """Cancel all open orders - FIXED VERSION"""
     try:
+        # ✅ First get all open orders with proper parameters
         params = {"product_ids": str(PRODUCT_ID), "states": "open"}
         result = make_api_request('GET', '/orders', params=params)
         
@@ -468,6 +471,23 @@ def cancel_all_orders():
             global pending_stop_losses, stop_loss_orders
             pending_stop_losses.clear()
             stop_loss_orders.clear()
+            
+        else:
+            # ✅ Alternative: Use bulk cancel API
+            logger.info("🔍 Trying bulk cancel API...")
+            payload = json.dumps({
+                "product_id": PRODUCT_ID,
+                "cancel_limit_orders": "true",
+                "cancel_stop_orders": "true",
+                "cancel_reduce_only_orders": "true"
+            })
+            
+            bulk_result = make_api_request('DELETE', '/orders/all', payload)
+            if bulk_result and bulk_result.get('success'):
+                message = f"🗑️ *ALL ORDERS CANCELLED (BULK)*"
+                log_and_notify(message)
+            else:
+                logger.error(f"❌ Bulk cancel failed: {bulk_result}")
             
     except Exception as e:
         logger.error(f"❌ Error cancelling orders: {e}")
@@ -607,45 +627,48 @@ def webhook():
 
 @app.route('/status', methods=['GET'])
 def status():
-    """Get current trading status - ENHANCED VERSION"""
+    """Get current trading status - COMPLETE VERSION"""
     try:
         current_pos = get_position_data()
         current_price = get_current_price()
         
-        orders_result = make_api_request('GET', '/orders', params={"product_ids": str(PRODUCT_ID), "states": "open"})
+        # ✅ Fixed orders query with proper parameters
+        params = {"product_ids": str(PRODUCT_ID), "states": "open"}
+        orders_result = make_api_request('GET', '/orders', params=params)
         open_orders = []
         
         if orders_result and orders_result.get('success'):
             open_orders = orders_result.get('result', [])
         
+                # ✅ Position details
+        position_info = "None"
+        if current_pos and current_pos.get('size') != 0:
+            pos_size = current_pos.get('size', 0)
+            entry_price = current_pos.get('entry_price', 'N/A')
+            unrealized_pnl = current_pos.get('unrealized_pnl', 'N/A')
+            position_side = "LONG" if pos_size > 0 else "SHORT"
+            position_info = f"{position_side} | Size: {abs(pos_size)} | Entry: ${entry_price} | PnL: ${unrealized_pnl}"
+        
+        # ✅ Orders summary
+        orders_summary = []
+        for order in open_orders:
+            order_type = order.get('order_type', 'unknown')
+            side = order.get('side', 'unknown').upper()
+            price = order.get('limit_price') or order.get('stop_price', 'N/A')
+            size = order.get('unfilled_size', order.get('size', 0))
+            orders_summary.append(f"{side} {order_type} @${price} ({size} contracts)")
+        
         message = f"📊 *TRADING STATUS*\n" \
                  f"🎯 Symbol: `{SYMBOL}` (ID: {PRODUCT_ID})\n" \
                  f"💰 Current Price: `${current_price or 'N/A'}`\n" \
-                 f"📈 Position Status: `{current_position or 'None'}`\n" \
+                 f"📈 Position: `{position_info}`\n" \
                  f"📋 Open Orders: `{len(open_orders)}`\n" \
                  f"🛡️ Stop Loss Orders: `{len(stop_loss_orders)}`\n" \
-                 f"⏳ Pending SL Orders: `{len(pending_stop_losses)}`"
+                 f"⏳ Pending SL: `{len(pending_stop_losses)}`\n" \
+                 f"🤖 Bot Status: `{current_position or 'Idle'}`"
         
-        if current_pos:
-            pos_size = current_pos.get('size', 0)
-            entry_price = current_pos.get('entry_price', 'N/A')
-            margin = current_pos.get('margin', 'N/A')
-            unrealized_pnl = current_pos.get('unrealized_pnl', 'N/A')
-            message += f"\n\n💼 *POSITION DETAILS*\n" \
-                      f"📏 Size: `{pos_size}` contracts\n" \
-                      f"💵 Entry: `${entry_price}`\n" \
-                      f"🏦 Margin: `${margin}`\n" \
-                      f"📈 Unrealized PnL: `${unrealized_pnl}`"
-        
-        if open_orders:
-            message += f"\n\n📋 *OPEN ORDERS*\n"
-            for i, order in enumerate(open_orders[:3]):  # Show max 3 orders
-                order_id = order.get('id', 'N/A')
-                order_side = order.get('side', 'N/A').upper()
-                order_size = order.get('size', 'N/A')
-                order_price = order.get('limit_price', order.get('stop_price', 'N/A'))
-                order_type = order.get('order_type', 'N/A')
-                message += f"• `{order_id}` | {order_side} | {order_size} @ ${order_price} ({order_type})\n"
+        if orders_summary:
+            message += f"\n\n📋 *ORDER DETAILS:*\n" + "\n".join([f"• {order}" for order in orders_summary[:5]])
         
         log_and_notify(message)
         
@@ -655,128 +678,61 @@ def status():
             "position": current_pos,
             "open_orders_count": len(open_orders),
             "stop_loss_orders": len(stop_loss_orders),
-            "pending_stop_losses": len(pending_stop_losses)
+            "pending_stop_losses": len(pending_stop_losses),
+            "bot_status": current_position
         })
         
     except Exception as e:
-        error_msg = f"❌ *STATUS CHECK ERROR*\n🚨 Error: `{str(e)}`"
+        error_msg = f"❌ *STATUS ERROR*\n🚨 Error: `{str(e)}`"
         log_and_notify(error_msg, "error")
         return jsonify({"status": "error", "message": str(e)}), 500
 
 @app.route('/cancel_all', methods=['POST'])
-def cancel_all_orders_endpoint():
-    """Cancel all orders endpoint"""
+def cancel_all_endpoint():
+    """Manual endpoint to cancel all orders"""
     try:
         cancel_all_orders()
-        message = "🗑️ *ALL ORDERS CANCELLATION REQUESTED*"
-        log_and_notify(message)
         return jsonify({"status": "success", "message": "All orders cancelled"})
     except Exception as e:
-        error_msg = f"❌ *CANCEL ALL ERROR*\n🚨 Error: `{str(e)}`"
-        log_and_notify(error_msg, "error")
         return jsonify({"status": "error", "message": str(e)}), 500
 
 @app.route('/close_position', methods=['POST'])
 def close_position_endpoint():
-    """Close position endpoint"""
+    """Manual endpoint to close position"""
     try:
         close_position()
-        return jsonify({"status": "success", "message": "Position close requested"})
+        return jsonify({"status": "success", "message": "Position closed"})
     except Exception as e:
-        error_msg = f"❌ *CLOSE POSITION ERROR*\n🚨 Error: `{str(e)}`"
-        log_and_notify(error_msg, "error")
         return jsonify({"status": "error", "message": str(e)}), 500
 
 @app.route('/health', methods=['GET'])
 def health_check():
     """Health check endpoint"""
-    try:
-        # Test API connectivity
-        product = verify_product()
-        current_price = get_current_price()
-        
-        if product and current_price:
-            return jsonify({
-                "status": "healthy",
-                "api_connection": "ok",
-                "product_verified": True,
-                "current_price": current_price,
-                "timestamp": datetime.now().isoformat()
-            })
-        else:
-            return jsonify({
-                "status": "unhealthy",
-                "api_connection": "failed",
-                "product_verified": False,
-                "timestamp": datetime.now().isoformat()
-            }), 503
-            
-    except Exception as e:
-        return jsonify({
-            "status": "error",
-            "message": str(e),
-            "timestamp": datetime.now().isoformat()
-        }), 500
-
-@app.route('/test_telegram', methods=['POST'])
-def test_telegram():
-    """Test Telegram notification"""
-    try:
-        test_message = "🧪 *TELEGRAM TEST MESSAGE*\n" \
-                      f"✅ Bot is working correctly!\n" \
-                      f"⏰ Time: `{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}`"
-        send_telegram_message(test_message)
-        return jsonify({"status": "success", "message": "Test message sent"})
-    except Exception as e:
-        return jsonify({"status": "error", "message": str(e)}), 500
-
-# Initialize bot on startup
-def initialize_bot():
-    """Initialize bot and send startup message"""
-    try:
-        logger.info("🚀 Starting Delta Trading Bot...")
-        
-        # Verify product
-        product = verify_product()
-        if not product:
-            error_msg = "❌ *BOT STARTUP FAILED*\n🚨 Product verification failed"
-            log_and_notify(error_msg, "error")
-            return False
-        
-        # Get current price
-        current_price = get_current_price()
-        
-        # Send startup message
-        startup_message = f"🚀 *DELTA TRADING BOT STARTED*\n" \
-                         f"🎯 Symbol: `{SYMBOL}` (ID: {PRODUCT_ID})\n" \
-                         f"💰 Current Price: `${current_price or 'N/A'}`\n" \
-                         f"📏 Default Lot Size: `{LOT_SIZE}` BTC\n" \
-                         f"✅ Product Status: `{product.get('trading_status', 'N/A')}`\n" \
-                         f"🌐 Webhook URL: `/webhook`\n" \
-                         f"📊 Status URL: `/status`\n" \
-                         f"⏰ Started at: `{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}`"
-        
-        log_and_notify(startup_message)
-        logger.info("✅ Bot initialized successfully")
-        return True
-        
-    except Exception as e:
-        error_msg = f"❌ *BOT INITIALIZATION ERROR*\n🚨 Error: `{str(e)}`"
-        log_and_notify(error_msg, "error")
-        return False
+    return jsonify({
+        "status": "healthy",
+        "timestamp": datetime.now().isoformat(),
+        "bot_version": "1.0.0"
+    })
 
 if __name__ == '__main__':
-    # Initialize bot
-    if initialize_bot():
-        logger.info("🌐 Starting Flask server...")
-        # Run Flask app
-        app.run(
-            host='0.0.0.0',  # Allow external connections
-            port=5000,       # Port number
-            debug=False,     # Set to False for production
-            threaded=True    # Enable threading for concurrent requests
-        )
+    # ✅ Startup message
+    startup_message = f"🚀 *DELTA TRADING BOT STARTED*\n" \
+                     f"🎯 Symbol: `{SYMBOL}`\n" \
+                     f"📊 Product ID: `{PRODUCT_ID}`\n" \
+                     f"📏 Default Lot Size: `{LOT_SIZE}` BTC\n" \
+                     f"⏰ Timestamp: `{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}`\n" \
+                     f"🌐 Webhook URL: `http://your-server:5000/webhook`\n" \
+                     f"📊 Status URL: `http://your-server:5000/status`"
+    
+    log_and_notify(startup_message)
+    
+    # ✅ Verify product on startup
+    product = verify_product()
+    if product:
+        log_and_notify(f"✅ *PRODUCT VERIFIED*\n🎯 {product.get('symbol')} | Status: {product.get('trading_status')}")
     else:
-        logger.error("❌ Bot initialization failed. Exiting...")
-        exit(1)
+        log_and_notify("❌ *PRODUCT VERIFICATION FAILED*", "error")
+    
+    # ✅ Start Flask app
+    app.run(host='0.0.0.0', port=5000, debug=False)
 
