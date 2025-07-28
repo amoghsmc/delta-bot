@@ -127,8 +127,6 @@ def make_api_request(method, endpoint, payload='', params=None):
 
     return None
 
-
-
 def get_order_status(order_id):
     """Get order status by order ID"""
     result = make_api_request('GET', f'/orders/{order_id}')
@@ -150,7 +148,9 @@ def place_stop_limit_order(side, stop_price, limit_price, size):
         stop_order_type = "stop_loss_order"
         limit_price = stop_price - gap  # SELL: limit price below stop
 
+    # ✅ FIXED: Include both product_id AND product_symbol
     order_data = {
+        "product_id": PRODUCT_ID,
         "product_symbol": SYMBOL,
         "size": contracts,
         "side": stop_side,
@@ -268,12 +268,10 @@ def monitor_order_and_place_sl(order_id, original_side, stop_loss_price, contrac
         if order_id in pending_stop_losses:
             del pending_stop_losses[order_id]
 
-
-
-
 def cancel_all_orders():
     """Cancel all open orders for the symbol"""
-    params = {"product_id": PRODUCT_ID, "state": "open"}
+    # ✅ FIXED: Use product_ids parameter
+    params = {"product_ids": str(PRODUCT_ID), "states": "open"}
     result = make_api_request('GET', '/orders', params=params)
     
     if result and result.get('success'):
@@ -330,7 +328,9 @@ def close_position():
     close_side = "sell" if btc_position['size'] > 0 else "buy"
     position_value = position_size * 0.001
     
+    # ✅ FIXED: Include both product_id AND product_symbol
     close_order_data = {
+        "product_id": PRODUCT_ID,
         "product_symbol": SYMBOL,
         "size": position_size,
         "side": close_side,
@@ -489,7 +489,8 @@ def status():
                     current_pos = pos
                     break
         
-        orders_result = make_api_request('GET', '/orders', params={"product_id": PRODUCT_ID, "state": "open"})
+        # ✅ FIXED: Use product_ids parameter
+        orders_result = make_api_request('GET', '/orders', params={"product_ids": str(PRODUCT_ID), "states": "open"})
         open_orders = []
         
         if orders_result and orders_result.get('success'):
@@ -575,4 +576,3 @@ if __name__ == '__main__':
     logger.info("✨ AMOGH SMC Strategy Integration Ready")
     
     app.run(host='0.0.0.0', port=5000, debug=False)
-            
