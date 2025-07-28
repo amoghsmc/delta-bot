@@ -105,24 +105,28 @@ def make_api_request(method, endpoint, payload='', params=None):
             response = requests.post(url, headers=headers, data=payload, timeout=30)
         elif method == 'DELETE':
             response = requests.delete(url, headers=headers, params=params, timeout=30)
-        
+
         response.raise_for_status()
         return response.json()
-    
+
+    except requests.exceptions.HTTPError as e:
+        if e.response is not None:
+            status_code = e.response.status_code
+            reason = e.response.reason
+            error_text = e.response.text
+            error_msg = f"❌ API request failed: {status_code} {reason} | {error_text}"
+        else:
+            error_msg = f"❌ HTTP error occurred: {e}"
+        logger.error(error_msg)
+        log_and_notify(error_msg, "error")
+
     except requests.exceptions.RequestException as e:
-    if isinstance(e, requests.exceptions.HTTPError) and e.response is not None:
-        error_text = e.response.text
-        status_code = e.response.status_code
-        logger.error(f"API request failed: {status_code} - {error_text}")
-    else:
-        logger.error(f"API request failed: {str(e)}")
+        error_msg = f"❌ Request error occurred: {str(e)}"
+        logger.error(error_msg)
+        log_and_notify(error_msg, "error")
+
     return None
-        reason = e.response.reason
-        error_msg = f"❌ API request failed: {status_code} {reason} | {error_text}"
-    else:
-        error_msg = f"❌ API request failed: {e}"
-    log_and_notify(error_msg, "error")
-    return None
+
 
 
 def get_order_status(order_id):
