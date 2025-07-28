@@ -77,14 +77,14 @@ def generate_signature(secret, message):
 
 def make_api_request(method, endpoint, payload='', params=None):
     """Make authenticated API request to Delta Exchange"""
-    logger.info(f"🔍 API CALL → {method} {url}")
-logger.info(f"🔍 Payload → {payload}")
-logger.info(f"🔍 Params  → {params}")
-
     timestamp = str(int(time.time()))
     path = f'/v2{endpoint}'
     url = f'{BASE_URL}{path}'
-    
+
+    logger.info(f"🔍 API CALL → {method} {url}")
+    logger.info(f"🔍 Payload → {payload}")
+    logger.info(f"🔍 Params  → {params}")
+
     query_string = ''
     if params:
         query_string = '&'.join([f'{k}={v}' for k, v in params.items()])
