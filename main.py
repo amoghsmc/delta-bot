@@ -139,39 +139,47 @@ def get_order_status(order_id):
     return None
 
 def get_position_data():
-    """Get position data using multiple methods - FIXED VERSION"""
+    """Get position data - COMPLETELY FIXED VERSION"""
     try:
-        # ✅ Method 1: Try specific product_id endpoint
+        logger.info("🔍 Attempting to get position data...")
+        
+        # ✅ Method 1: Use /positions/margined (most reliable)
+        logger.info("🔍 Trying /positions/margined endpoint...")
+        result = make_api_request('GET', '/positions/margined')
+        
+        if result and result.get('success'):
+            positions = result.get('result', [])
+            logger.info(f"✅ Got {len(positions)} positions from /positions/margined")
+            
+            for pos in positions:
+                logger.info(f"🔍 Checking position: {pos.get('product_symbol')} with size {pos.get('size')}")
+                if pos.get('product_symbol') == SYMBOL and pos.get('size') != 0:
+                    logger.info(f"✅ Found matching position: {pos}")
+                    return pos
+        
+        # ✅ Method 2: Try with specific product_id (single position)
+        logger.info("🔍 Trying /positions with product_id...")
         params = {"product_id": PRODUCT_ID}
         result = make_api_request('GET', '/positions', params=params)
         
         if result and result.get('success'):
             position_data = result.get('result')
+            logger.info(f"✅ Got position data: {position_data}")
             if position_data and position_data.get('size') != 0:
-                logger.info(f"✅ Found position via /positions: {position_data}")
                 return position_data
         
-        # ✅ Method 2: Try underlying_asset_symbol
+        # ✅ Method 3: Try with underlying_asset_symbol
+        logger.info("🔍 Trying /positions with underlying_asset_symbol...")
         params = {"underlying_asset_symbol": "BTC"}
         result = make_api_request('GET', '/positions', params=params)
         
         if result and result.get('success'):
             position_data = result.get('result')
+            logger.info(f"✅ Got position data via underlying_asset: {position_data}")
             if position_data and position_data.get('size') != 0:
-                logger.info(f"✅ Found position via underlying_asset_symbol: {position_data}")
                 return position_data
         
-        # ✅ Method 3: Fallback to margined positions (returns array)
-        result = make_api_request('GET', '/positions/margined')
-        
-        if result and result.get('success'):
-            positions = result.get('result', [])
-            for pos in positions:
-                if pos.get('product_symbol') == SYMBOL and pos.get('size') != 0:
-                    logger.info(f"✅ Found position via /positions/margined: {pos}")
-                    return pos
-        
-        logger.info("ℹ️ No open position found")
+        logger.info("ℹ️ No open position found in any method")
         return None
         
     except Exception as e:
@@ -353,10 +361,7 @@ def close_position():
     """Close current position with market order - COMPLETELY FIXED"""
     global current_position
     
-    if not current_position:
-        return
-    
-    # ✅ Get position data using multiple methods
+    # ✅ Always try to get fresh position data
     position_data = get_position_data()
     
     if not position_data or position_data.get('size') == 0:
@@ -524,7 +529,7 @@ def webhook():
 def status():
     """Get current trading status - COMPLETELY FIXED"""
     try:
-        # ✅ Get position data using multiple methods
+        # ✅ Get position data using the fixed function
         current_pos = get_position_data()
         
         # ✅ CORRECT PARAMETER FORMAT for orders
@@ -597,8 +602,9 @@ def test_telegram():
 
 @app.route('/test_position', methods=['GET'])
 def test_position():
-    """Test position fetching"""
+    """Test position fetching with detailed logging"""
     try:
+        logger.info("🧪 Starting position test...")
         position_data = get_position_data()
         
         if position_data:
@@ -606,11 +612,13 @@ def test_position():
                      f"📏 Size: `{position_data.get('size', 0)}` contracts\n" \
                      f"💵 Entry Price: `${position_data.get('entry_price', 'N/A')}`\n" \
                      f"🏦 Margin: `${position_data.get('margin', 'N/A')}`\n" \
-                     f"🎯 Symbol: `{position_data.get('product_symbol', SYMBOL)}`"
+                     f"🎯 Symbol: `{position_data.get('product_symbol', SYMBOL)}`\n" \
+                     f"🆔 Product ID: `{position_data.get('product_id', 'N/A')}`"
         else:
             message = "ℹ️ *NO POSITION FOUND*\n" \
                      f"🎯 Symbol: `{SYMBOL}`\n" \
-                     f"📊 All position endpoints tested"
+                     f"📊 All position endpoints tested\n" \
+                     f"🔍 Check logs for detailed API responses"
         
         send_telegram_message(message)
         return jsonify({"status": "success", "position": position_data})
@@ -622,7 +630,7 @@ def test_position():
 
 if __name__ == '__main__':
     startup_message = f"🚀 *DELTA TRADING BOT STARTED (POSITION API FIXED)*\n" \
-                     f"🎯 Symbol: `{SYMBOL}`\n" \
+                     f"🎯 Symbol: `{SYMBOL}` (Product ID: {PRODUCT_ID})\n" \
                      f"📏 Lot Size: `{LOT_SIZE}` BTC\n" \
                      f"📋 Order Type: Stop Limit Orders (FIXED)\n" \
                      f"⏰ Auto-cancel: 90 minutes\n" \
