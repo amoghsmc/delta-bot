@@ -206,14 +206,31 @@ def get_position_data():
         return None
 
 def place_entry_order(side, entry_price, size):
-    """Place entry order with enhanced error handling - FIXED VERSION"""
-    try:
-        # ✅ Verify product first
-        product = verify_product()
-        if not product:
-            error_msg = f"❌ Product verification failed for {SYMBOL}"
-            log_and_notify(error_msg, "error")
-            return None
+    symbol = SYMBOL or "BTCUSD"
+    product_id = f"{symbol}-PERP"
+
+    order_data = {
+        "product_id": product_id,  # ✅ MANDATORY
+        "side": side,
+        "size": int(size * 1000),
+        "stop_price": entry_price,
+        "limit_price": entry_price + 50,  # example offset
+        "order_type": "stop_limit_order",
+        "post_only": False
+    }
+
+    log_and_notify(f"📤 Sending Entry Order: {json.dumps(order_data)}")  # ✅ Debugging line
+
+    payload = json.dumps(order_data)
+    result = make_api_request('POST', '/orders', payload)
+
+    if result and result.get("success"):
+        log_and_notify("✅ Entry order placed successfully.")
+        return result.get("result", {}).get("id")
+    else:
+        log_and_notify(f"❌ FAILED TO PLACE ENTRY ORDER\n🚨 Error: {result}")
+        return None
+
             
         # ✅ Calculate contracts properly
         contracts = max(1, int(size * 1000))  # Minimum 1 contract
