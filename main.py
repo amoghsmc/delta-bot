@@ -206,33 +206,35 @@ def get_position_data():
         return None
 
 def place_entry_order(side, entry_price, size):
-    symbol = SYMBOL or "BTCUSD"
-    product_id = f"{symbol}-PERP"
+    # Use the correct product_id (integer)
+    product_id = PRODUCT_ID
 
-    contracts = max(1, int(size * 1000))  # ✅ Minimum 1 contract
-    formatted_price = f"{float(entry_price):.2f}"
+    # Calculate size in contracts
+    contracts = max(1, int(size * 1000))
+    stop_price = round(entry_price, 2)
+    limit_price = round(entry_price + 50, 2)  # Adjust as needed
 
-    # ✅ Get current price for comparison
-    current_price = get_current_price()
-    if current_price:
-        logger.info(f"🔍 Current price: ${current_price}, Entry price: ${formatted_price}")
-        if side.lower() == 'buy' and float(formatted_price) >= current_price:
-            logger.info(f"ℹ️ Buy limit order at ${formatted_price} is above current price ${current_price} - will wait for price to come down")
-        elif side.lower() == 'sell' and float(formatted_price) <= current_price:
-            logger.info(f"ℹ️ Sell limit order at ${formatted_price} is below current price ${current_price} - will wait for price to come up")
-
-    # ✅ Final order payload
     order_data = {
         "product_id": product_id,
         "side": side,
         "size": contracts,
-        "stop_price": round(entry_price, 2),
-        "limit_price": round(entry_price + 50, 2),  # Tune this offset
-        "order_type": "stop_limit_order",
-        "post_only": False
+        "stop_price": stop_price,
+        "limit_price": limit_price,
+        "order_type": "stop_limit",
+        "time_in_force": "gtc"
     }
 
     log_and_notify(f"📤 Sending Entry Order: {json.dumps(order_data)}")
+    payload = json.dumps(order_data)
+    result = make_api_request('POST', '/orders', payload)
+
+    if result and result.get("success"):
+        log_and_notify("✅ Entry order placed successfully.")
+        return result.get("result", {}).get("id")
+    else:
+        log_and_notify(f"❌ FAILED TO PLACE ENTRY ORDER\n🚨 Error: {result}")
+        return None
+
 
     payload = json.dumps(order_data)
     result = make_api_request('POST', '/orders', payload)
