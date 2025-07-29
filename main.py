@@ -176,19 +176,10 @@ def get_position_data():
         return None
 
 def place_entry_order(side, entry_price, size):
-    """Place limit order for entry with proper validation"""
+    """Place breakout limit order without blocking above/below market price"""
     try:
-        current_price = get_current_price()
         contracts = max(1, int(size * 1000))
         formatted_price = f"{float(entry_price):.2f}"
-
-        # Validate price direction
-        if side.lower() == 'buy' and current_price and entry_price <= current_price:
-            log_and_notify(f"⚠️ Buy limit price (${entry_price}) must be above current price (${current_price})", "warning")
-            return None
-        elif side.lower() == 'sell' and current_price and entry_price >= current_price:
-            log_and_notify(f"⚠️ Sell limit price (${entry_price}) must be below current price (${current_price})", "warning")
-            return None
 
         order_data = {
             "product_id": PRODUCT_ID,
@@ -198,18 +189,18 @@ def place_entry_order(side, entry_price, size):
             "limit_price": formatted_price,
             "time_in_force": "gtc"
         }
-        
-        log_and_notify(f"🧾 Placing {side} limit order at ${formatted_price}")
+
+        log_and_notify(f"🧾 Placing {side.upper()} breakout limit order at ${formatted_price}")
         payload = json.dumps(order_data)
         result = make_api_request('POST', '/orders', payload)
 
         if result and result.get('success'):
             order_id = result['result']['id']
-            message = f"✅ *{side.upper()} LIMIT ORDER PLACED*\n" \
+            message = f"✅ *{side.upper()} LIMIT ORDER PLACED (BREAKOUT STYLE)*\n" \
                      f"💰 Price: `${formatted_price}`\n" \
                      f"📏 Size: `{contracts}` contracts\n" \
                      f"🆔 Order ID: `{order_id}`\n" \
-                     f"⏳ Auto-cancel in 90 minutes if not filled"
+                     f"⏳ Waiting for price to reach..."
             log_and_notify(message)
             return order_id
         else:
@@ -224,6 +215,7 @@ def place_entry_order(side, entry_price, size):
                    f"🚨 Error: `{str(e)}`"
         log_and_notify(error_msg, "error")
         return None
+
 
 def place_market_order(side, size):
     """Place market order for exits"""
