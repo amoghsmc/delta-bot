@@ -45,8 +45,10 @@ def send_telegram_message(message):
             'text': full_message,
             'parse_mode': 'Markdown'
         }
-        
+
         response = requests.post(TELEGRAM_API_URL, json=payload, timeout=10)
+        print(f"📡 Telegram API Response: {response.status_code} {response.text}")  # 👈 debug print
+
         if response.status_code == 200:
             logger.info("✅ Telegram message sent successfully")
         else:
@@ -54,16 +56,19 @@ def send_telegram_message(message):
     except Exception as e:
         logger.error(f"❌ Telegram error: {e}")
 
+
 def log_and_notify(message, level="info"):
-    """Log message and send to Telegram"""
+    print(f"📤 Sending Telegram message:\n{message}")  # 👈 debug print
+
     if level == "info":
         logger.info(message)
     elif level == "error":
         logger.error(message)
     elif level == "warning":
         logger.warning(message)
-    
+
     send_telegram_message(message)
+)
 
 def generate_signature(secret, message):
     """Generate HMAC signature for Delta Exchange API"""
