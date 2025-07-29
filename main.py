@@ -429,22 +429,28 @@ def close_position_endpoint():
 
 @app.route('/status', methods=['GET'])
 def status():
-    """Get bot status"""
+    """Get bot status and send to Telegram"""
     position = get_position_data()
-    return jsonify({
+    current_price = get_current_price()
+    pending = len(pending_orders)
+
+    status_info = {
         "status": "running",
         "position": position,
         "pending_orders": pending_orders,
-        "current_price": get_current_price()
-    })
+        "current_price": current_price
+    }
 
-if __name__ == '__main__':
-    # Startup message
-    startup_msg = f"🚀 DELTA TRADING BOT STARTED\n" \
-                 f"🎯 Symbol: {SYMBOL}\n" \
-                 f"📏 Lot Size: {LOT_SIZE} BTC\n" \
-                 f"⏰ {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
-    log_and_notify(startup_msg)
+    # Format Telegram message
+    message = f"📊 *BOT STATUS CHECKED*\n" \
+              f"📍 Position: `{position if position else 'None'}`\n" \
+              f"📋 Pending Orders: `{pending}`\n" \
+              f"💰 Current Price: `${current_price}`"
+
+    log_and_notify(message)  # Logs + Telegram both
+
+    return jsonify(status_info)
+
 
     # Start Flask app
     app.run(host='0.0.0.0', port=5000, debug=False)
