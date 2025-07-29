@@ -112,7 +112,8 @@ def make_api_request(method, endpoint, payload='', params=None):
     except requests.exceptions.RequestException as e:
         error_msg = f"❌ Request error: {str(e)}"
         logger.error(error_msg)
-        return None
+        return {"error": str(e)}
+
 
 def get_current_price():
     """Get current market price"""
