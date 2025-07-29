@@ -11,10 +11,8 @@ import threading
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
-
 from flask import Flask
 app = Flask(__name__)
-
 
 # Delta Exchange API Configuration
 BASE_URL = 'https://api.india.delta.exchange'
@@ -49,8 +47,6 @@ def send_telegram_message(message):
         }
 
         response = requests.post(TELEGRAM_API_URL, json=payload, timeout=10)
-        print(f"📡 Telegram API Response: {response.status_code} {response.text}")  # 👈 debug print
-
         if response.status_code == 200:
             logger.info("✅ Telegram message sent successfully")
         else:
@@ -58,19 +54,15 @@ def send_telegram_message(message):
     except Exception as e:
         logger.error(f"❌ Telegram error: {e}")
 
-
 def log_and_notify(message, level="info"):
-    print(f"📤 Sending Telegram message:\n{message}")  # 👈 debug print
-
+    """Log and send notification"""
     if level == "info":
         logger.info(message)
     elif level == "error":
         logger.error(message)
     elif level == "warning":
         logger.warning(message)
-
     send_telegram_message(message)
-)
 
 def generate_signature(secret, message):
     """Generate HMAC signature for Delta Exchange API"""
@@ -84,10 +76,6 @@ def make_api_request(method, endpoint, payload='', params=None):
     timestamp = str(int(time.time()))
     path = f'/v2{endpoint}'
     url = f'{BASE_URL}{path}'
-
-    logger.info(f"🔍 API CALL → {method} {url}")
-    logger.info(f"🔍 Payload → {payload}")
-    logger.info(f"🔍 Params  → {params}")
 
     query_string = ''
     if params:
@@ -114,9 +102,6 @@ def make_api_request(method, endpoint, payload='', params=None):
         elif method == 'DELETE':
             response = requests.delete(url, headers=headers, params=params, timeout=30)
 
-        logger.info(f"Response Status: {response.status_code}")
-        logger.info(f"Response Text: {response.text}")
-
         if response.status_code == 200:
             return response.json()
         else:
@@ -134,9 +119,7 @@ def get_current_price():
     try:
         ticker_result = make_api_request('GET', f'/products/{PRODUCT_ID}/ticker')
         if ticker_result and ticker_result.get('success'):
-            current_price = float(ticker_result['result']['mark_price'])
-            logger.info(f"📊 Current price: ${current_price}")
-            return current_price
+            return float(ticker_result['result']['mark_price'])
         return None
     except Exception as e:
         logger.error(f"❌ Error getting current price: {e}")
@@ -176,38 +159,25 @@ def get_position_data():
         return None
 
 def place_entry_order(side, stop_price, size):
-    """Place stop-limit order for breakout entries with automatic limit offset"""
+    """Place stop-market order for breakout entries"""
     try:
-        contracts = max(1, int(size * 1000))
+        contracts = max(1, int(size * 1000))  # Convert BTC to contracts
         stop_price = float(stop_price)
-        limit_offset = 10.0  # 💡 You can customize this offset
-
-        # Auto-calculate limit price based on side
-        if side.lower() == 'buy':
-            limit_price = stop_price + limit_offset
-        elif side.lower() == 'sell':
-            limit_price = stop_price - limit_offset
-        else:
-            log_and_notify(f"❌ Invalid side: {side}", "error")
-            return None
-
         formatted_stop = f"{stop_price:.2f}"
-        formatted_limit = f"{limit_price:.2f}"
 
         order_data = {
             "product_id": PRODUCT_ID,
             "size": contracts,
             "side": side.lower(),
-            "order_type": "stop_limit_order",
+            "order_type": "stop_market_order",
             "stop_price": formatted_stop,
-            "limit_price": formatted_limit,
             "stop_trigger_method": "last_traded_price",
-            "time_in_force": "gtc"
+            "time_in_force": "ioc"
         }
 
-        log_and_notify(f"📈 Placing {side.upper()} *STOP-LIMIT* order\n"
-                       f"🔫 Trigger (Stop): `${formatted_stop}`\n"
-                       f"🎯 Limit: `${formatted_limit}`")
+        log_and_notify(f"📈 Placing {side.upper()} STOP-MARKET order\n"
+                      f"🔫 Trigger: ${formatted_stop}\n"
+                      f"📏 Size: {size} BTC ({contracts} contracts)")
 
         payload = json.dumps(order_data)
         result = make_api_request('POST', '/orders', payload)
@@ -215,25 +185,22 @@ def place_entry_order(side, stop_price, size):
         if result and result.get('success'):
             order_id = result['result']['id']
             log_and_notify(
-                f"✅ *{side.upper()} STOP-LIMIT ORDER PLACED*\n"
-                f"🆔 Order ID: `{order_id}`\n"
-                f"📏 Size: `{contracts}` contracts\n"
+                f"✅ {side.upper()} STOP-MARKET ORDER PLACED\n"
+                f"🆔 Order ID: {order_id}\n"
+                f"📏 Size: {contracts} contracts\n"
                 f"🕒 Waiting for trigger..."
             )
             return order_id
         else:
-            error_msg = f"❌ *FAILED TO PLACE {side.upper()} STOP-LIMIT*\n" \
-                        f"🚨 Error: `{result.get('error', 'Unknown error') if result else 'No response'}`"
+            error_msg = f"❌ FAILED TO PLACE {side.upper()} ORDER\n" \
+                      f"Error: {result.get('error', 'Unknown error') if result else 'No response'}"
             log_and_notify(error_msg, "error")
             return None
 
     except Exception as e:
-        error_msg = f"❌ *STOP-LIMIT ORDER ERROR*\n🚨 `{str(e)}`"
+        error_msg = f"❌ ORDER ERROR\nError: {str(e)}"
         log_and_notify(error_msg, "error")
         return None
-
-
-
 
 def place_market_order(side, size):
     """Place market order for exits"""
@@ -253,20 +220,20 @@ def place_market_order(side, size):
 
         if result and result.get('success'):
             order_id = result['result']['id']
-            message = f"✅ *{side.upper()} MARKET ORDER EXECUTED*\n" \
-                     f"📏 Size: `{contracts}` contracts\n" \
-                     f"🆔 Order ID: `{order_id}`"
+            message = f"✅ {side.upper()} MARKET ORDER EXECUTED\n" \
+                     f"📏 Size: {contracts} contracts\n" \
+                     f"🆔 Order ID: {order_id}"
             log_and_notify(message)
             return order_id
         else:
-            error_msg = f"❌ *FAILED TO EXECUTE {side.upper()} MARKET ORDER*\n" \
-                       f"📏 Size: `{contracts}` contracts\n" \
-                       f"🚨 Error: `{result.get('error', 'Unknown error') if result else 'No response'}`"
+            error_msg = f"❌ FAILED TO EXECUTE {side.upper()} ORDER\n" \
+                      f"📏 Size: {contracts} contracts\n" \
+                      f"🚨 Error: {result.get('error', 'Unknown error') if result else 'No response'}"
             log_and_notify(error_msg, "error")
             return None
     except Exception as e:
-        error_msg = f"❌ *MARKET ORDER ERROR*\n" \
-                   f"🚨 Error: `{str(e)}`"
+        error_msg = f"❌ MARKET ORDER ERROR\n" \
+                   f"🚨 Error: {str(e)}"
         log_and_notify(error_msg, "error")
         return None
 
@@ -286,29 +253,24 @@ def monitor_order(order_id, side, entry_price, stop_loss, size):
             filled = order_status.get('size_filled', 0)
             
             if state == 'filled':
-                message = f"✅ *ORDER FILLED*\n" \
-                         f"🆔 Order ID: `{order_id}`\n" \
-                         f"📏 Filled: `{filled}` contracts"
+                message = f"✅ ORDER FILLED\n" \
+                         f"🆔 Order ID: {order_id}\n" \
+                         f"📏 Filled: {filled} contracts"
                 log_and_notify(message)
                 return True
             elif state in ['cancelled', 'rejected']:
-                message = f"❌ *ORDER {state.upper()}*\n" \
-                         f"🆔 Order ID: `{order_id}`"
+                message = f"❌ ORDER {state.upper()}\n" \
+                         f"🆔 Order ID: {order_id}"
                 log_and_notify(message, "warning")
                 return False
             
             # Send update every 5 minutes
             if int(time.time() - start_time) % 300 == 0:
                 remaining = (max_wait - (time.time() - start_time)) / 60
-                order_id_str = order_id if order_id else 'N/A'
-filled_str = filled if filled else 0
-remaining_str = int(remaining) if remaining else '??'
-
-message = f"⏳ *ORDER PENDING*\n" \
-          f"🆔 Order ID: `{order_id_str}`\n" \
-          f"📏 Filled: `{filled_str}` contracts\n" \
-          f"⏱️ Auto-cancel in `{remaining_str}` minutes"
-
+                message = f"⏳ ORDER PENDING\n" \
+                         f"🆔 Order ID: {order_id}\n" \
+                         f"📏 Filled: {filled} contracts\n" \
+                         f"⏱️ Auto-cancel in {int(remaining)} minutes"
                 log_and_notify(message)
             
             time.sleep(10)
@@ -317,8 +279,8 @@ message = f"⏳ *ORDER PENDING*\n" \
             time.sleep(10)
     
     # Timeout reached - cancel order
-    message = f"⏰ *ORDER TIMEOUT - CANCELLING*\n" \
-             f"🆔 Order ID: `{order_id}`"
+    message = f"⏰ ORDER TIMEOUT - CANCELLING\n" \
+             f"🆔 Order ID: {order_id}"
     log_and_notify(message, "warning")
     make_api_request('DELETE', f'/orders/{order_id}')
     return False
@@ -359,8 +321,8 @@ def close_position():
         log_and_notify(f"🚪 Closing position: {side.upper()} {size} contracts")
         place_market_order(side, size * 0.001)  # Convert to BTC size
     except Exception as e:
-        error_msg = f"❌ *POSITION CLOSE ERROR*\n" \
-                   f"🚨 Error: `{str(e)}`"
+        error_msg = f"❌ POSITION CLOSE ERROR\n" \
+                   f"🚨 Error: {str(e)}"
         log_and_notify(error_msg, "error")
 
 @app.route('/webhook', methods=['POST'])
@@ -373,49 +335,45 @@ def webhook():
         logger.info(f"📨 Received alert: {json.dumps(data)}")
 
         alert_type = data.get('alert_type')
-        entry_price = float(data.get('entry_price', 0))
+        stop_price = float(data.get("stop_price"))
         stop_loss = float(data.get('stop_loss', 0))
         size = float(data.get('lot_size', LOT_SIZE))
 
-        current_price = get_current_price()
-
         if alert_type == 'LONG_ENTRY':
-            log_and_notify(f"🟢 LONG ENTRY SIGNAL\n💰 {entry_price} | 🛑 {stop_loss}")
+            log_and_notify(f"🟢 LONG ENTRY SIGNAL\n🔫 Stop: {stop_price} | 🛑 SL: {stop_loss}")
             cancel_all_orders()
-            order_id = place_entry_order('buy', entry_price, size)
+            order_id = place_entry_order('buy', stop_price, size)
             if order_id:
                 current_position = 'long_pending'
                 pending_orders[order_id] = {
                     'type': 'entry',
                     'side': 'buy',
-                    'price': entry_price,
+                    'price': stop_price,
                     'size': size,
                     'stop_loss': stop_loss
                 }
-                # Start monitoring thread
                 threading.Thread(
                     target=monitor_order,
-                    args=(order_id, 'buy', entry_price, stop_loss, size),
+                    args=(order_id, 'buy', stop_price, stop_loss, size),
                     daemon=True
                 ).start()
 
         elif alert_type == 'SHORT_ENTRY':
-            log_and_notify(f"🔴 SHORT ENTRY SIGNAL\n💰 {entry_price} | 🛑 {stop_loss}")
+            log_and_notify(f"🔴 SHORT ENTRY SIGNAL\n🔫 Stop: {stop_price} | 🛑 SL: {stop_loss}")
             cancel_all_orders()
-            order_id = place_entry_order('sell', entry_price, size)
+            order_id = place_entry_order('sell', stop_price, size)
             if order_id:
                 current_position = 'short_pending'
                 pending_orders[order_id] = {
                     'type': 'entry',
                     'side': 'sell',
-                    'price': entry_price,
+                    'price': stop_price,
                     'size': size,
                     'stop_loss': stop_loss
                 }
-                # Start monitoring thread
                 threading.Thread(
                     target=monitor_order,
-                    args=(order_id, 'sell', entry_price, stop_loss, size),
+                    args=(order_id, 'sell', stop_price, stop_loss, size),
                     daemon=True
                 ).start()
 
@@ -427,7 +385,7 @@ def webhook():
         return jsonify({"status": "success"})
 
     except Exception as e:
-        error_msg = f"❌ *WEBHOOK ERROR*\n🚨 Error: `{str(e)}`"
+        error_msg = f"❌ WEBHOOK ERROR\nError: {str(e)}"
         log_and_notify(error_msg, "error")
         return jsonify({"status": "error", "message": str(e)}), 500
 
@@ -451,7 +409,7 @@ def close_position_endpoint():
 
 @app.route('/status', methods=['GET'])
 def status():
-    """Get bot status and send to Telegram"""
+    """Get bot status"""
     position = get_position_data()
     current_price = get_current_price()
     pending = len(pending_orders)
@@ -463,16 +421,13 @@ def status():
         "current_price": current_price
     }
 
-    # Format Telegram message
-    message = f"📊 *BOT STATUS CHECKED*\n" \
-              f"📍 Position: `{position if position else 'None'}`\n" \
-              f"📋 Pending Orders: `{pending}`\n" \
-              f"💰 Current Price: `${current_price}`"
+    message = f"📊 BOT STATUS\n" \
+              f"📍 Position: {position if position else 'None'}\n" \
+              f"📋 Pending Orders: {pending}\n" \
+              f"💰 Current Price: {current_price}"
 
-    log_and_notify(message)  # Logs + Telegram both
-
+    log_and_notify(message)
     return jsonify(status_info)
 
-
-    # Start Flask app
+if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=False)
