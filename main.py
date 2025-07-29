@@ -175,46 +175,63 @@ def get_position_data():
         logger.error(f"❌ Error getting position data: {e}")
         return None
 
-def place_entry_order(side, entry_price, size):
-    """Place stop-limit order for breakout entries"""
+def place_entry_order(side, stop_price, size):
+    """Place stop-limit order for breakout entries with automatic limit offset"""
     try:
         contracts = max(1, int(size * 1000))
-        formatted_price = f"{float(entry_price):.2f}"
+        stop_price = float(stop_price)
+        limit_offset = 1.0  # 💡 You can customize this offset
+
+        # Auto-calculate limit price based on side
+        if side.lower() == 'buy':
+            limit_price = stop_price + limit_offset
+        elif side.lower() == 'sell':
+            limit_price = stop_price - limit_offset
+        else:
+            log_and_notify(f"❌ Invalid side: {side}", "error")
+            return None
+
+        formatted_stop = f"{stop_price:.2f}"
+        formatted_limit = f"{limit_price:.2f}"
 
         order_data = {
             "product_id": PRODUCT_ID,
             "size": contracts,
             "side": side.lower(),
             "order_type": "stop_limit_order",
-            "limit_price": formatted_price,
-            "stop_price": formatted_price,
+            "stop_price": formatted_stop,
+            "limit_price": formatted_limit,
             "stop_trigger_method": "last_traded_price",
             "time_in_force": "gtc"
         }
 
-        log_and_notify(f"⏳ Placing {side.upper()} *STOP-LIMIT* order at ${formatted_price}")
+        log_and_notify(f"📈 Placing {side.upper()} *STOP-LIMIT* order\n"
+                       f"🔫 Trigger (Stop): `${formatted_stop}`\n"
+                       f"🎯 Limit: `${formatted_limit}`")
+
         payload = json.dumps(order_data)
         result = make_api_request('POST', '/orders', payload)
 
         if result and result.get('success'):
             order_id = result['result']['id']
-            message = f"✅ *{side.upper()} STOP-LIMIT ORDER PLACED*\n" \
-                      f"🎯 Trigger Price: `${formatted_price}`\n" \
-                      f"📏 Size: `{contracts}` contracts\n" \
-                      f"🆔 Order ID: `{order_id}`\n" \
-                      f"🕒 Waiting for breakout to hit..."
-            log_and_notify(message)
+            log_and_notify(
+                f"✅ *{side.upper()} STOP-LIMIT ORDER PLACED*\n"
+                f"🆔 Order ID: `{order_id}`\n"
+                f"📏 Size: `{contracts}` contracts\n"
+                f"🕒 Waiting for trigger..."
+            )
             return order_id
         else:
             error_msg = f"❌ *FAILED TO PLACE {side.upper()} STOP-LIMIT*\n" \
                         f"🚨 Error: `{result.get('error', 'Unknown error') if result else 'No response'}`"
             log_and_notify(error_msg, "error")
             return None
+
     except Exception as e:
-        error_msg = f"❌ *ORDER PLACEMENT ERROR*\n" \
-                    f"🚨 Error: `{str(e)}`"
+        error_msg = f"❌ *STOP-LIMIT ORDER ERROR*\n🚨 `{str(e)}`"
         log_and_notify(error_msg, "error")
         return None
+
 
 
 
