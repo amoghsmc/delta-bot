@@ -288,10 +288,15 @@ def monitor_order(order_id, side, entry_price, stop_loss, size):
             # Send update every 5 minutes
             if int(time.time() - start_time) % 300 == 0:
                 remaining = (max_wait - (time.time() - start_time)) / 60
-                message = f"⏳ *ORDER PENDING*\n" \
-                         f"🆔 Order ID: `{order_id}`\n" \
-                         f"📏 Filled: `{filled}` contracts\n" \
-                         f"⏱️ Auto-cancel in {int(remaining)} minutes"
+                order_id_str = order_id if order_id else 'N/A'
+filled_str = filled if filled else 0
+remaining_str = int(remaining) if remaining else '??'
+
+message = f"⏳ *ORDER PENDING*\n" \
+          f"🆔 Order ID: `{order_id_str}`\n" \
+          f"📏 Filled: `{filled_str}` contracts\n" \
+          f"⏱️ Auto-cancel in `{remaining_str}` minutes"
+
                 log_and_notify(message)
             
             time.sleep(10)
