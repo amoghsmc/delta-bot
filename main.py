@@ -176,7 +176,7 @@ def get_position_data():
         return None
 
 def place_entry_order(side, entry_price, size):
-    """Place breakout limit order without blocking above/below market price"""
+    """Place stop-limit order for breakout entries"""
     try:
         contracts = max(1, int(size * 1000))
         formatted_price = f"{float(entry_price):.2f}"
@@ -185,36 +185,37 @@ def place_entry_order(side, entry_price, size):
             "product_id": PRODUCT_ID,
             "size": contracts,
             "side": side.lower(),
-            "order_type": "limit_order",
+            "order_type": "stop_limit_order",
             "limit_price": formatted_price,
+            "stop_price": formatted_price,
+            "stop_trigger_method": "last_traded_price",
             "time_in_force": "gtc"
         }
 
-        log_and_notify(f"🧾 Placing {side.upper()} breakout limit order at ${formatted_price}")
+        log_and_notify(f"⏳ Placing {side.upper()} *STOP-LIMIT* order at ${formatted_price}")
         payload = json.dumps(order_data)
         result = make_api_request('POST', '/orders', payload)
 
         if result and result.get('success'):
             order_id = result['result']['id']
-            message = f"✅ *{side.upper()} LIMIT ORDER PLACED (BREAKOUT STYLE)*\n" \
-                     f"💰 Price: `${formatted_price}`\n" \
-                     f"📏 Size: `{contracts}` contracts\n" \
-                     f"🆔 Order ID: `{order_id}`\n" \
-                     f"⏳ Waiting for price to reach..."
+            message = f"✅ *{side.upper()} STOP-LIMIT ORDER PLACED*\n" \
+                      f"🎯 Trigger Price: `${formatted_price}`\n" \
+                      f"📏 Size: `{contracts}` contracts\n" \
+                      f"🆔 Order ID: `{order_id}`\n" \
+                      f"🕒 Waiting for breakout to hit..."
             log_and_notify(message)
             return order_id
         else:
-            error_msg = f"❌ *FAILED TO PLACE {side.upper()} ORDER*\n" \
-                       f"💰 Price: `${formatted_price}`\n" \
-                       f"📏 Size: `{contracts}` contracts\n" \
-                       f"🚨 Error: `{result.get('error', 'Unknown error') if result else 'No response'}`"
+            error_msg = f"❌ *FAILED TO PLACE {side.upper()} STOP-LIMIT*\n" \
+                        f"🚨 Error: `{result.get('error', 'Unknown error') if result else 'No response'}`"
             log_and_notify(error_msg, "error")
             return None
     except Exception as e:
         error_msg = f"❌ *ORDER PLACEMENT ERROR*\n" \
-                   f"🚨 Error: `{str(e)}`"
+                    f"🚨 Error: `{str(e)}`"
         log_and_notify(error_msg, "error")
         return None
+
 
 
 def place_market_order(side, size):
