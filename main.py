@@ -180,7 +180,7 @@ def place_entry_order(side, stop_price, size):
     try:
         contracts = max(1, int(size * 1000))
         stop_price = float(stop_price)
-        limit_offset = 1.0  # 💡 You can customize this offset
+        limit_offset = 10.0  # 💡 You can customize this offset
 
         # Auto-calculate limit price based on side
         if side.lower() == 'buy':
