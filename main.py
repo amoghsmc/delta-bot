@@ -589,7 +589,7 @@ if __name__ == "__main__":
 
     # 🔁 Flask webhook server
     def run_flask():
-        app.run(host="0.0.0.0", port=5050)
+        app.run(host="0.0.0.0", port=5000)
 
     # ♻️ Background monitoring loop (price, orders, etc.)
     def run_bot_loop():
