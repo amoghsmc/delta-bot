@@ -554,11 +554,4 @@ def webhook():
 # Keep all other existing functions (cancel_all_orders, close_position, monitor_order, etc.)
 # with similar enhancements...
 
-if __name__ == "__main__":
-    logger.info("🚀 Starting Amogh SMC Trading Bot v2.0")
-    logger.info(f"📊 Base URL: {BASE_URL}")
-    logger.info(f"🎯 Symbol: {SYMBOL} (Product ID: {PRODUCT_ID})")
-    logger.info(f"📏 Default Lot Size: {LOT_SIZE}")
-    
-    from waitress import serve
-    serve(app, host="0.0.0.0", port=5000)
+
