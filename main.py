@@ -701,7 +701,4 @@ def webhook():
             "processing_time": processing_time
         }), 500
 
-@app.route('/webhook', methods=['POST'])
-def webhook():
-    ...
 
