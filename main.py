@@ -25,12 +25,12 @@ app = Flask(__name__)
 
 # Delta Exchange API Configuration
 BASE_URL = 'https://api.india.delta.exchange'
-API_KEY = 'NWczUdbI9vVbBlCASC0rRFolMpPM32'
-API_SECRET = 'YTN79e7x2vuLSYzGW7YUBMnZNJEXTDPxsMaEpH0ZwXptQRwl9zjEby0Z8oAp'
+API_KEY = 'NWczUdbI9vVbBlCASC0rRFolMpPM32'  # Replace with your actual API key
+API_SECRET = 'YTN79e7x2vuLSYzGW7YUBMnZNJEXTDPxsMaEpH0ZwXptQRwl9zjEby0Z8oAp'  # Replace with your actual API secret
 
 # Telegram Configuration
-TELEGRAM_BOT_TOKEN = '8068558939:AAHcsThdbt0J1uzI0mT140H9vJXbcaVZ9Jk'
-TELEGRAM_CHAT_ID = '871704959'
+TELEGRAM_BOT_TOKEN = '8068558939:AAHcsThdbt0J1uzI0mT140H9vJXbcaVZ9Jk'  # Replace with your actual token
+TELEGRAM_CHAT_ID = '871704959'  # Replace with your actual chat ID
 TELEGRAM_API_URL = f'https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage'
 
 # Trading Configuration
@@ -157,7 +157,7 @@ def make_api_request(method, endpoint, payload='', params=None) -> Tuple[bool, O
             elif method == 'POST':
                 response = requests.post(url, headers=headers, data=payload, timeout=REQUEST_TIMEOUT)
             elif method == 'DELETE':
-                response = requests.delete(url, headers=headers, params=params, timeout=REQUEST_TIMEOUT)
+                response = requests.delete(url, headers=headers, data=payload, params=params, timeout=REQUEST_TIMEOUT)
             else:
                 logger.error(f"❌ [{request_id}] Unsupported method: {method}")
                 return False, {"error": "Unsupported HTTP method"}
@@ -283,14 +283,25 @@ def get_order_status(order_id):
     """Get order status by order ID with enhanced error handling"""
     logger.info(f"🔍 Getting status for order {order_id}")
     
-    success, result = make_api_request('GET', f'/orders/{order_id}')
-    
-    if success and result and result.get('success'):
-        order_data = result.get('result')
-        logger.info(f"📋 Order {order_id} status: {order_data.get('state', 'unknown')}")
-        return order_data
-    else:
-        logger.error(f"❌ Failed to get order status for {order_id}: {result}")
+    try:
+        success, result = make_api_request('GET', f'/orders/{order_id}')
+        
+        if success and result and result.get('success'):
+            order_data = result.get('result')
+            if order_data:
+                state = order_data.get('state', 'unknown')
+                logger.info(f"📋 Order {order_id} status: {state}")
+                return order_data
+            else:
+                logger.warning(f"⚠️ No order data in response for {order_id}")
+                return None
+        else:
+            error_details = result.get('error', 'Unknown error') if result else 'No response'
+            logger.error(f"❌ Failed to get order status for {order_id}: {error_details}")
+            return None
+            
+    except Exception as e:
+        logger.error(f"❌ Exception getting order status for {order_id}: {str(e)}")
         return None
 
 def get_position_data():
@@ -326,6 +337,143 @@ def get_position_data():
         logger.error(f"❌ Error getting position data: {str(e)}")
         logger.error(f"📋 Traceback: {traceback.format_exc()}")
         return None
+
+def cancel_all_orders():
+    """Cancel all open orders"""
+    try:
+        log_and_notify("❎ Cancelling all open orders...")
+        
+        # Use the correct endpoint from Delta Exchange API
+        payload = json.dumps({
+            "product_id": PRODUCT_ID,
+            "cancel_limit_orders": "true",
+            "cancel_stop_orders": "true",
+            "cancel_reduce_only_orders": "true"
+        })
+        
+        success, result = make_api_request('DELETE', '/orders/all', payload)
+        
+        if success and result and result.get('success'):
+            log_and_notify("✅ All open orders cancelled successfully.")
+        else:
+            error_details = result.get('error', 'Unknown error') if result else 'No response'
+            log_and_notify(f"⚠️ Failed to cancel all orders: {error_details}", level="error")
+            
+    except Exception as e:
+        log_and_notify(f"❌ ERROR cancelling all orders: {str(e)}", level="error")
+        logger.error(f"📋 Traceback: {traceback.format_exc()}")
+
+def close_position():
+    """Close current position at market"""
+    try:
+        log_and_notify("🔄 Checking for position to close...")
+        
+        position = get_position_data()
+        if position and position.get('size', 0) != 0:
+            position_size = int(position['size'])
+            side = 'sell' if position_size > 0 else 'buy'  # Long position = sell to close, Short = buy to close
+            size = abs(position_size) / 1000.0  # Convert contracts to BTC
+            
+            log_and_notify(f"📍 Found position: {position_size} contracts")
+            log_and_notify(f"🚪 Closing position with {side.upper()} market order")
+            
+            order_id = place_market_order(side, size)
+            if order_id:
+                log_and_notify("✅ Position close order placed successfully")
+            else:
+                log_and_notify("❌ Failed to place position close order", level="error")
+        else:
+            log_and_notify("ℹ️ No open position to close.")
+            
+    except Exception as e:
+        log_and_notify(f"❌ ERROR closing position: {str(e)}", level="error")
+        logger.error(f"📋 Traceback: {traceback.format_exc()}")
+
+def monitor_order(order_id, side, entry_price, stop_loss, size):
+    """Monitor a pending order and manage SL"""
+    try:
+        log_and_notify(f"👀 Monitoring order {order_id}...", request_id=order_id)
+        
+        filled = False
+        max_wait_time = 600  # 10 minutes
+        check_interval = 2   # Check every 2 seconds
+        
+        for i in range(0, max_wait_time, check_interval):
+            try:
+                order = get_order_status(order_id)
+                if order:
+                    order_state = order.get('state', 'unknown')
+                    logger.info(f"📊 [{order_id}] Order state: {order_state}")
+                    
+                    if order_state == 'filled':
+                        filled = True
+                        filled_size = order.get('size_filled', 0)
+                        avg_fill_price = order.get('average_fill_price', entry_price)
+                        
+                        log_and_notify(
+                            f"✅ ORDER {order_id} FILLED!\n"
+                            f"📏 Size: {filled_size} contracts\n"
+                            f"💰 Avg Price: ${avg_fill_price}\n"
+                            f"📍 Position activated.",
+                            request_id=order_id
+                        )
+                        
+                        # Update global position status
+                        global current_position
+                        current_position = 'long' if side == 'buy' else 'short'
+                        
+                        # Remove from pending orders
+                        if order_id in pending_orders:
+                            del pending_orders[order_id]
+                        
+                        break
+                    elif order_state in ['cancelled', 'rejected']:
+                        log_and_notify(
+                            f"❌ Order {order_id} was {order_state}",
+                            request_id=order_id
+                        )
+                        # Clean up
+                        if order_id in pending_orders:
+                            del pending_orders[order_id]
+                        current_position = None
+                        break
+                        
+                else:
+                    logger.warning(f"⚠️ [{order_id}] Could not get order status")
+                
+                time.sleep(check_interval)
+                
+            except Exception as e:
+                logger.error(f"❌ [{order_id}] Error checking order status: {str(e)}")
+                time.sleep(check_interval)
+
+        if not filled:
+            log_and_notify(
+                f"⌛ Order {order_id} not filled in {max_wait_time//60} minutes. Cancelling...",
+                request_id=order_id
+            )
+            
+            # Cancel the unfilled order
+            cancel_payload = json.dumps({"id": order_id, "product_id": PRODUCT_ID})
+            success, result = make_api_request('DELETE', '/orders', cancel_payload)
+            
+            if success:
+                log_and_notify(f"✅ Order {order_id} cancelled successfully", request_id=order_id)
+            else:
+                log_and_notify(f"⚠️ Failed to cancel order {order_id}", level="error", request_id=order_id)
+            
+            # Clean up
+            if order_id in pending_orders:
+                del pending_orders[order_id]
+            current_position = None
+
+    except Exception as e:
+        log_and_notify(f"❌ ERROR in monitor_order: {str(e)}", level="error")
+        logger.error(f"📋 Traceback: {traceback.format_exc()}")
+        
+        # Clean up on error
+        if order_id in pending_orders:
+            del pending_orders[order_id]
 
 def place_entry_order(side, stop_price, size, request_id=None):
     """Place stop-market order for breakout entries with enhanced error handling"""
@@ -380,7 +528,6 @@ def place_entry_order(side, stop_price, size, request_id=None):
         log_and_notify(error_msg, "error", request_id=request_id)
         return None
 
-# Continue with other functions...
 def place_market_order(side, size, request_id=None):
     """Place market order for exits with enhanced error handling"""
     try:
@@ -551,7 +698,4 @@ def webhook():
             "processing_time": processing_time
         }), 500
 
-# Keep all other existing functions (cancel_all_orders, close_position, monitor_order, etc.)
-# with similar enhancements...
-
-
+@app.
