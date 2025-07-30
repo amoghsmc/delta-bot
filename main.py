@@ -476,7 +476,7 @@ def monitor_order(order_id, side, entry_price, stop_loss, size):
             del pending_orders[order_id]
 
 def place_entry_order(side, stop_price, size, request_id=None):
-    """Place stop-market order for breakout entries with enhanced error handling"""
+    """Place stop-market order using Delta's supported schema"""
     try:
         contracts = max(1, int(size * 1000))
         stop_price = float(stop_price)
@@ -486,10 +486,11 @@ def place_entry_order(side, stop_price, size, request_id=None):
             "product_id": PRODUCT_ID,
             "size": contracts,
             "side": side.lower(),
-            "order_type": "stop_market_order",
+            "order_type": "limit_order",  # ✅ Required
+            "stop_order_type": "stop_market_order",  # ✅ Real stop type
             "stop_price": formatted_stop,
             "stop_trigger_method": "last_traded_price",
-            "time_in_force": "ioc"
+            "time_in_force": "gtc"  # Good till cancel
         }
 
         log_and_notify(f"📈 Placing {side.upper()} STOP-MARKET order\n"
@@ -498,7 +499,8 @@ def place_entry_order(side, stop_price, size, request_id=None):
                       request_id=request_id)
 
         payload = json.dumps(order_data)
-        success, result = make_api_request('POST', '/orders', payload)
+        success, result = make_api_request('POST', '/orders/create', payload)
+
 
         if success and result and result.get('success'):
             order_id = result['result']['id']
@@ -527,6 +529,7 @@ def place_entry_order(side, stop_price, size, request_id=None):
                    f"📋 Traceback: {traceback.format_exc()}"
         log_and_notify(error_msg, "error", request_id=request_id)
         return None
+
 
 def place_market_order(side, size, request_id=None):
     """Place market order for exits with enhanced error handling"""
