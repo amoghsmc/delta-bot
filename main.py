@@ -23,14 +23,15 @@ logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
 
+# ⚠️ REPLACE WITH YOUR ACTUAL CREDENTIALS ⚠️
 # Delta Exchange API Configuration
 BASE_URL = 'https://api.india.delta.exchange'
-API_KEY = 'NWczUdbI9vVbBlCASC0rRFolMpPM32'  # Replace with your actual API key
-API_SECRET = 'YTN79e7x2vuLSYzGW7YUBMnZNJEXTDPxsMaEpH0ZwXptQRwl9zjEby0Z8oAp'  # Replace with your actual API secret
+API_KEY = 'your_delta_api_key_here'  # 🔑 Replace with your actual API key
+API_SECRET = 'your_delta_api_secret_here'  # 🔑 Replace with your actual API secret
 
-# Telegram Configuration
-TELEGRAM_BOT_TOKEN = '8068558939:AAHcsThdbt0J1uzI0mT140H9vJXbcaVZ9Jk'  # Replace with your actual token
-TELEGRAM_CHAT_ID = '871704959'  # Replace with your actual chat ID
+# Telegram Configuration  
+TELEGRAM_BOT_TOKEN = 'your_telegram_bot_token_here'  # 🤖 Replace with your bot token
+TELEGRAM_CHAT_ID = 'your_telegram_chat_id_here'  # 💬 Replace with your chat ID
 TELEGRAM_API_URL = f'https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage'
 
 # Trading Configuration
@@ -139,7 +140,7 @@ def make_api_request(method, endpoint, payload='', params=None) -> Tuple[bool, O
         'api-key': API_KEY,
         'timestamp': timestamp,
         'signature': signature,
-        'User-Agent': 'amogh-smc-bot/2.0',
+        'User-Agent': 'delta-trading-bot/3.0',
         'Content-Type': 'application/json'
     }
 
@@ -236,7 +237,7 @@ def validate_webhook_data(data: Dict) -> Tuple[bool, str]:
     if not data:
         return False, "No data received"
     
-    required_fields = ['alert_type', 'stop_price']
+    required_fields = ['alert_type']
     missing_fields = []
     
     for field in required_fields:
@@ -254,14 +255,6 @@ def validate_webhook_data(data: Dict) -> Tuple[bool, str]:
     valid_alert_types = ['LONG_ENTRY', 'SHORT_ENTRY', 'LONG_EXIT', 'SHORT_EXIT']
     if data['alert_type'] not in valid_alert_types:
         return False, f"Invalid alert_type: {data['alert_type']}. Must be one of: {valid_alert_types}"
-    
-    # Validate stop_price
-    try:
-        stop_price = float(data['stop_price'])
-        if stop_price <= 0:
-            return False, f"Invalid stop_price: {stop_price}. Must be positive"
-    except (ValueError, TypeError) as e:
-        return False, f"Invalid stop_price format: {data['stop_price']} - {str(e)}"
     
     return True, "Validation passed"
 
@@ -377,7 +370,7 @@ def close_position():
             log_and_notify(f"📍 Found position: {position_size} contracts")
             log_and_notify(f"🚪 Closing position with {side.upper()} market order")
             
-            order_id = place_market_order(side, size)
+            order_id = place_immediate_market_order(side, size)
             if order_id:
                 log_and_notify("✅ Position close order placed successfully")
             else:
@@ -389,163 +382,23 @@ def close_position():
         log_and_notify(f"❌ ERROR closing position: {str(e)}", level="error")
         logger.error(f"📋 Traceback: {traceback.format_exc()}")
 
-def monitor_order(order_id, side, entry_price, stop_loss, size):
-    """Monitor a pending order and manage SL"""
-    try:
-        log_and_notify(f"👀 Monitoring order {order_id}...", request_id=order_id)
-        
-        filled = False
-        max_wait_time = 600  # 10 minutes
-        check_interval = 2   # Check every 2 seconds
-        
-        for i in range(0, max_wait_time, check_interval):
-            try:
-                order = get_order_status(order_id)
-                if order:
-                    order_state = order.get('state', 'unknown')
-                    logger.info(f"📊 [{order_id}] Order state: {order_state}")
-                    
-                    if order_state == 'filled':
-                        filled = True
-                        filled_size = order.get('size_filled', 0)
-                        avg_fill_price = order.get('average_fill_price', entry_price)
-                        
-                        log_and_notify(
-                            f"✅ ORDER {order_id} FILLED!\n"
-                            f"📏 Size: {filled_size} contracts\n"
-                            f"💰 Avg Price: ${avg_fill_price}\n"
-                            f"📍 Position activated.",
-                            request_id=order_id
-                        )
-                        
-                        # Update global position status
-                        global current_position
-                        current_position = 'long' if side == 'buy' else 'short'
-                        
-                        # Remove from pending orders
-                        if order_id in pending_orders:
-                            del pending_orders[order_id]
-                        
-                        break
-                    elif order_state in ['cancelled', 'rejected']:
-                        log_and_notify(
-                            f"❌ Order {order_id} was {order_state}",
-                            request_id=order_id
-                        )
-                        # Clean up
-                        if order_id in pending_orders:
-                            del pending_orders[order_id]
-                        current_position = None
-                        break
-                        
-                else:
-                    logger.warning(f"⚠️ [{order_id}] Could not get order status")
-                
-                time.sleep(check_interval)
-                
-            except Exception as e:
-                logger.error(f"❌ [{order_id}] Error checking order status: {str(e)}")
-                time.sleep(check_interval)
-
-        if not filled:
-            log_and_notify(
-                f"⌛ Order {order_id} not filled in {max_wait_time//60} minutes. Cancelling...",
-                request_id=order_id
-            )
-            
-            # Cancel the unfilled order
-            cancel_payload = json.dumps({"id": order_id, "product_id": PRODUCT_ID})
-            success, result = make_api_request('DELETE', '/orders', cancel_payload)
-            
-            if success:
-                log_and_notify(f"✅ Order {order_id} cancelled successfully", request_id=order_id)
-            else:
-                log_and_notify(f"⚠️ Failed to cancel order {order_id}", level="error", request_id=order_id)
-            
-            # Clean up
-            if order_id in pending_orders:
-                del pending_orders[order_id]
-            current_position = None
-
-    except Exception as e:
-        log_and_notify(f"❌ ERROR in monitor_order: {str(e)}", level="error")
-        logger.error(f"📋 Traceback: {traceback.format_exc()}")
-        
-        # Clean up on error
-        if order_id in pending_orders:
-            del pending_orders[order_id]
-
-def place_entry_order(side, stop_price, size, request_id=None):
-    """Place stop-market order using Delta's supported schema"""
+def place_immediate_market_order(side, size, request_id=None):
+    """Place immediate market order when alert is received"""
     try:
         contracts = max(1, int(size * 1000))
-        stop_price = float(stop_price)
-        formatted_stop = f"{stop_price:.2f}"
-
+        
         order_data = {
             "product_id": PRODUCT_ID,
             "size": contracts,
             "side": side.lower(),
-            "order_type": "limit_order",  # ✅ Required
-            "stop_order_type": "stop_market_order",  # ✅ Real stop type
-            "stop_price": formatted_stop,
-            "stop_trigger_method": "last_traded_price",
-            "time_in_force": "gtc"  # Good till cancel
+            "order_type": "market_order",  # ✅ Immediate market order
+            "time_in_force": "ioc"  # Immediate or Cancel
         }
-
-        log_and_notify(f"📈 Placing {side.upper()} STOP-MARKET order\n"
-                      f"🔫 Trigger: ${formatted_stop}\n"
+        
+        log_and_notify(f"⚡ Placing IMMEDIATE {side.upper()} MARKET order\n"
                       f"📏 Size: {size} BTC ({contracts} contracts)", 
                       request_id=request_id)
 
-        payload = json.dumps(order_data)
-        success, result = make_api_request('POST', '/orders/create', payload)
-
-
-        if success and result and result.get('success'):
-            order_id = result['result']['id']
-            order_state = result['result'].get('state', 'unknown')
-            
-            log_and_notify(
-                f"✅ {side.upper()} STOP-MARKET ORDER PLACED\n"
-                f"🆔 Order ID: {order_id}\n"
-                f"📏 Size: {contracts} contracts\n"
-                f"📊 State: {order_state}\n"
-                f"🕒 Waiting for trigger...",
-                request_id=request_id
-            )
-            return order_id
-        else:
-            error_details = result.get('error', 'Unknown error') if result else 'No response'
-            error_msg = f"❌ FAILED TO PLACE {side.upper()} ORDER\n" \
-                       f"🚨 Error: {error_details}\n" \
-                       f"📋 Full Response: {json.dumps(result, indent=2) if result else 'None'}"
-            log_and_notify(error_msg, "error", request_id=request_id)
-            return None
-
-    except Exception as e:
-        error_msg = f"❌ ORDER PLACEMENT ERROR\n" \
-                   f"🚨 Error: {str(e)}\n" \
-                   f"📋 Traceback: {traceback.format_exc()}"
-        log_and_notify(error_msg, "error", request_id=request_id)
-        return None
-
-
-def place_market_order(side, size, request_id=None):
-    """Place market order for exits with enhanced error handling"""
-    try:
-        contracts = max(1, int(size * 1000))
-        order_data = {
-            "product_id": PRODUCT_ID,
-            "size": contracts,
-            "side": side.lower(),
-            "order_type": "market_order",
-            "time_in_force": "ioc"
-        }
-        
-        log_and_notify(f"⚡ Placing {side} market order\n📏 Size: {contracts} contracts", 
-                      request_id=request_id)
-        
         payload = json.dumps(order_data)
         success, result = make_api_request('POST', '/orders', payload)
 
@@ -553,23 +406,26 @@ def place_market_order(side, size, request_id=None):
             order_id = result['result']['id']
             order_state = result['result'].get('state', 'unknown')
             filled_size = result['result'].get('size_filled', 0)
+            avg_price = result['result'].get('average_fill_price', 'N/A')
             
-            message = f"✅ {side.upper()} MARKET ORDER EXECUTED\n" \
-                     f"🆔 Order ID: {order_id}\n" \
-                     f"📏 Size: {contracts} contracts\n" \
-                     f"📊 State: {order_state}\n" \
-                     f"✅ Filled: {filled_size} contracts"
-            log_and_notify(message, request_id=request_id)
+            log_and_notify(
+                f"✅ {side.upper()} MARKET ORDER EXECUTED!\n"
+                f"🆔 Order ID: {order_id}\n"
+                f"📏 Size: {contracts} contracts\n"
+                f"✅ Filled: {filled_size} contracts\n"
+                f"💰 Avg Price: ${avg_price}\n"
+                f"📊 State: {order_state}",
+                request_id=request_id
+            )
             return order_id
         else:
             error_details = result.get('error', 'Unknown error') if result else 'No response'
-            error_msg = f"❌ FAILED TO EXECUTE {side.upper()} ORDER\n" \
-                       f"📏 Size: {contracts} contracts\n" \
+            error_msg = f"❌ FAILED TO EXECUTE {side.upper()} MARKET ORDER\n" \
                        f"🚨 Error: {error_details}\n" \
                        f"📋 Full Response: {json.dumps(result, indent=2) if result else 'None'}"
             log_and_notify(error_msg, "error", request_id=request_id)
             return None
-            
+
     except Exception as e:
         error_msg = f"❌ MARKET ORDER ERROR\n" \
                    f"🚨 Error: {str(e)}\n" \
@@ -577,32 +433,82 @@ def place_market_order(side, size, request_id=None):
         log_and_notify(error_msg, "error", request_id=request_id)
         return None
 
+def place_stop_loss_order(side, stop_price, size, request_id=None):
+    """Place stop loss order after market entry"""
+    try:
+        contracts = max(1, int(size * 1000))
+        stop_price = float(stop_price)
+        formatted_stop = f"{stop_price:.2f}"
+        
+        # For SL: if we bought (long), SL is sell. If we sold (short), SL is buy
+        sl_side = 'sell' if side == 'buy' else 'buy'
+        
+        order_data = {
+            "product_id": PRODUCT_ID,
+            "size": contracts,
+            "side": sl_side,
+            "order_type": "market_order",
+            "stop_order_type": "stop_loss_order",
+            "stop_price": formatted_stop,
+            "stop_trigger_method": "last_traded_price",
+            "time_in_force": "gtc",
+            "reduce_only": "true"  # Only close position, don't open new
+        }
+
+        log_and_notify(f"🛑 Placing STOP LOSS order\n"
+                      f"🔫 Trigger: ${formatted_stop}\n"
+                      f"📏 Size: {size} BTC ({contracts} contracts)", 
+                      request_id=request_id)
+
+        payload = json.dumps(order_data)
+        success, result = make_api_request('POST', '/orders', payload)
+
+        if success and result and result.get('success'):
+            order_id = result['result']['id']
+            order_state = result['result'].get('state', 'unknown')
+            
+            log_and_notify(
+                f"✅ STOP LOSS ORDER PLACED\n"
+                f"🆔 Order ID: {order_id}\n"
+                f"🛑 SL Price: ${formatted_stop}\n"
+                f"📏 Size: {contracts} contracts\n"
+                f"📊 State: {order_state}",
+                request_id=request_id
+            )
+            return order_id
+        else:
+            error_details = result.get('error', 'Unknown error') if result else 'No response'
+            error_msg = f"❌ FAILED TO PLACE STOP LOSS\n" \
+                       f"🚨 Error: {error_details}"
+            log_and_notify(error_msg, "error", request_id=request_id)
+            return None
+
+    except Exception as e:
+        error_msg = f"❌ STOP LOSS ORDER ERROR\n" \
+                   f"🚨 Error: {str(e)}"
+        log_and_notify(error_msg, "error", request_id=request_id)
+        return None
+
 @app.route('/webhook', methods=['POST'])
 def webhook():
-    """Enhanced webhook handler with comprehensive error handling"""
-    global current_position, pending_orders
+    """Enhanced webhook handler for immediate market orders"""
+    global current_position, active_orders
     
     webhook_id = f"WH_{int(time.time() * 1000)}"
     start_time = time.time()
     
     logger.info(f"🎯 [{webhook_id}] Webhook request received")
     logger.info(f"📍 [{webhook_id}] Source IP: {request.remote_addr}")
-    logger.info(f"📍 [{webhook_id}] Headers: {dict(request.headers)}")
 
     try:
-        # Step 1: Get request data
-        logger.info(f"📋 [{webhook_id}] Step 1: Extracting request data")
-        
+        # Get and validate data
         if request.is_json:
             data = request.get_json()
         else:
             data = request.form.to_dict()
         
-        logger.info(f"📨 [{webhook_id}] Raw data received: {json.dumps(data, indent=2)}")
+        logger.info(f"📨 [{webhook_id}] Raw data: {json.dumps(data, indent=2)}")
 
-        # Step 2: Validate data
-        logger.info(f"🔍 [{webhook_id}] Step 2: Validating webhook data")
-        
         is_valid, validation_msg = validate_webhook_data(data)
         if not is_valid:
             error_msg = f"❌ WEBHOOK VALIDATION FAILED\n🚨 Error: {validation_msg}"
@@ -613,85 +519,91 @@ def webhook():
                 "webhook_id": webhook_id
             }), 400
 
-        # Step 3: Extract parameters
-        logger.info(f"⚙️ [{webhook_id}] Step 3: Processing parameters")
-        
+        # Extract parameters
         alert_type = data.get('alert_type')
-        stop_price = float(data.get("stop_price"))
-        stop_loss = float(data.get('stop_loss', 0))
+        stop_price = float(data.get("stop_price", 0)) if data.get("stop_price") else 0
+        stop_loss = float(data.get('stop_loss', 0)) if data.get('stop_loss') else 0
         size = float(data.get('lot_size', LOT_SIZE))
 
-        logger.info(f"📊 [{webhook_id}] Processed parameters:")
+        logger.info(f"📊 [{webhook_id}] Parameters:")
         logger.info(f"   Alert Type: {alert_type}")
-        logger.info(f"   Stop Price: {stop_price}")
+        logger.info(f"   Reference Price: {stop_price}")
         logger.info(f"   Stop Loss: {stop_loss}")
         logger.info(f"   Size: {size}")
 
-        # Step 4: Process alert
-        logger.info(f"🚀 [{webhook_id}] Step 4: Processing {alert_type} alert")
-
+        # Process alerts with immediate market orders
         if alert_type == 'LONG_ENTRY':
-            log_and_notify(f"🟢 LONG ENTRY SIGNAL\n🔫 Stop: {stop_price} | 🛑 SL: {stop_loss}", 
+            log_and_notify(f"🟢 LONG ENTRY SIGNAL - IMMEDIATE EXECUTION\n"
+                          f"💰 Reference Price: ${stop_price}\n"
+                          f"🛑 Stop Loss: ${stop_loss}", 
                           request_id=webhook_id)
-            cancel_all_orders()
-            order_id = place_entry_order('buy', stop_price, size, webhook_id)
+            
+            cancel_all_orders()  # Cancel any existing orders
+            
+            # Place immediate market buy order
+            order_id = place_immediate_market_order('buy', size, webhook_id)
             if order_id:
-                current_position = 'long_pending'
-                pending_orders[order_id] = {
-                    'type': 'entry',
-                    'side': 'buy',
-                    'price': stop_price,
-                    'size': size,
-                    'stop_loss': stop_loss,
-                    'webhook_id': webhook_id
-                }
-                threading.Thread(
-                    target=monitor_order,
-                    args=(order_id, 'buy', stop_price, stop_loss, size),
-                    daemon=True
-                ).start()
+                current_position = 'long'
+                
+                # Place stop loss order if provided
+                if stop_loss > 0:
+                    time.sleep(1)  # Small delay to ensure market order is processed
+                    sl_order_id = place_stop_loss_order('buy', stop_loss, size, webhook_id)
+                    if sl_order_id:
+                        active_orders[sl_order_id] = {
+                            'type': 'stop_loss',
+                            'side': 'sell',
+                            'price': stop_loss,
+                            'size': size
+                        }
 
         elif alert_type == 'SHORT_ENTRY':
-            log_and_notify(f"🔴 SHORT ENTRY SIGNAL\n🔫 Stop: {stop_price} | 🛑 SL: {stop_loss}", 
+            log_and_notify(f"🔴 SHORT ENTRY SIGNAL - IMMEDIATE EXECUTION\n"
+                          f"💰 Reference Price: ${stop_price}\n"
+                          f"🛑 Stop Loss: ${stop_loss}", 
                           request_id=webhook_id)
-            cancel_all_orders()
-            order_id = place_entry_order('sell', stop_price, size, webhook_id)
+            
+            cancel_all_orders()  # Cancel any existing orders
+            
+            # Place immediate market sell order
+            order_id = place_immediate_market_order('sell', size, webhook_id)
             if order_id:
-                current_position = 'short_pending'
-                pending_orders[order_id] = {
-                    'type': 'entry',
-                    'side': 'sell',
-                    'price': stop_price,
-                    'size': size,
-                    'stop_loss': stop_loss,
-                    'webhook_id': webhook_id
-                }
-                threading.Thread(
-                    target=monitor_order,
-                    args=(order_id, 'sell', stop_price, stop_loss, size),
-                    daemon=True
-                ).start()
+                current_position = 'short'
+                
+                # Place stop loss order if provided
+                if stop_loss > 0:
+                    time.sleep(1)  # Small delay
+                    sl_order_id = place_stop_loss_order('sell', stop_loss, size, webhook_id)
+                    if sl_order_id:
+                        active_orders[sl_order_id] = {
+                            'type': 'stop_loss',
+                            'side': 'buy',
+                            'price': stop_loss,
+                            'size': size
+                        }
 
         elif alert_type in ['LONG_EXIT', 'SHORT_EXIT']:
-            log_and_notify(f"🚪 {alert_type.replace('_', ' ')} SIGNAL", request_id=webhook_id)
-            close_position()
+            log_and_notify(f"🚪 {alert_type.replace('_', ' ')} SIGNAL - IMMEDIATE EXIT", 
+                          request_id=webhook_id)
+            cancel_all_orders()  # Cancel SL orders
+            close_position()     # Close with market order
             current_position = None
+            active_orders.clear()
 
         processing_time = time.time() - start_time
-        logger.info(f"✅ [{webhook_id}] Webhook processed successfully in {processing_time:.3f}s")
+        logger.info(f"✅ [{webhook_id}] Processed in {processing_time:.3f}s")
 
         return jsonify({
             "status": "success",
             "webhook_id": webhook_id,
             "processing_time": processing_time,
-            "alert_type": alert_type
+            "alert_type": alert_type,
+            "execution_type": "immediate_market"
         })
 
     except Exception as e:
         processing_time = time.time() - start_time
-        error_msg = f"❌ WEBHOOK ERROR\n" \
-                   f"🚨 Error: {str(e)}\n" \
-                   f"📋 Traceback: {traceback.format_exc()}"
+        error_msg = f"❌ WEBHOOK ERROR\n🚨 Error: {str(e)}"
         log_and_notify(error_msg, "critical", webhook_id)
         
         return jsonify({
@@ -701,4 +613,56 @@ def webhook():
             "processing_time": processing_time
         }), 500
 
+@app.route('/status', methods=['GET'])
+def status():
+    """Bot status endpoint"""
+    try:
+        current_price = get_current_price()
+        position = get_position_data()
+        
+        return jsonify({
+            "status": "running",
+            "timestamp": datetime.now().isoformat(),
+            "current_position": current_position,
+            "current_price": current_price,
+            "position_data": position,
+            "active_orders": len(active_orders),
+            "symbol": SYMBOL,
+            "product_id": PRODUCT_ID
+        })
+    except Exception as e:
+        return jsonify({
+            "status": "error",
+            "error": str(e)
+        }), 500
 
+@app.route('/health', methods=['GET'])
+def health():
+    """Health check endpoint"""
+    return jsonify({
+        "status": "healthy",
+        "timestamp": datetime.now().isoformat()
+    })
+
+# Send startup notification when module is imported
+try:
+    # This will run when Gunicorn imports the module
+    logger.info("🚀 Delta Trading Bot Module Loaded!")
+    logger.info(f"📊 Symbol: {SYMBOL}")
+    logger.info(f"🆔 Product ID: {PRODUCT_ID}")
+    logger.info(f"📏 Default Lot Size: {LOT_SIZE} BTC")
+    logger.info(f"⚡ Mode: Immediate Market Orders")
+    
+    # Send Telegram notification (if credentials are set)
+    if API_KEY != 'your_delta_api_key_here' and TELEGRAM_BOT_TOKEN != 'your_telegram_bot_token_here':
+        threading.Thread(
+            target=send_telegram_message, 
+            args=("🚀 Delta Trading Bot Started!\n"
+                  f"📊 Symbol: {SYMBOL}\n"
+                  f"🆔 Product ID: {PRODUCT_ID}\n"
+                  f"📏 Default Lot Size: {LOT_SIZE} BTC\n"
+                  f"⚡ Mode: Immediate Market Orders"),
+            daemon=True
+        ).start()
+except Exception as e:
+    logger.error(f"❌ Error in startup notification: {str(e)}")
