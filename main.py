@@ -582,3 +582,23 @@ if __name__ == '__main__':
     except Exception as e:
         logger.error(f"❌ Startup error: {str(e)}")
         send_telegram_message(f"❌ Bot startup failed: {str(e)}")
+        # 🌐 Start Flask + Background Bot together
+if __name__ == "__main__":
+    import threading
+    import time
+
+    # 🔁 Flask webhook server
+    def run_flask():
+        app.run(host="0.0.0.0", port=5000)
+
+    # ♻️ Background monitoring loop (price, orders, etc.)
+    def run_bot_loop():
+        while True:
+            logger.info("🔄 Background monitor running...")
+            # Your live trading checks go here (e.g., check_price(), check_status(), etc.)
+            time.sleep(10)
+
+    # Start both simultaneously
+    threading.Thread(target=run_flask).start()
+    run_bot_loop()
+
